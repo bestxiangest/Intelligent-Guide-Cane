@@ -44,18 +44,7 @@
  SemaphoreHandle_t i2cMutex = NULL;
  SemaphoreHandle_t spiMutex = NULL;
  
- // 障碍物检测结构体
- typedef struct {
-   uint8_t type;  // 0: 无障碍, 1: 前方障碍, 2: 左侧障碍, 3: 右侧障碍
-   uint16_t distance; // 障碍物距离(cm)
-   uint8_t priority;  // 警报优先级
- } ObstacleAlert;
- 
- // 红绿灯状态结构体
- typedef struct {
-   uint8_t status;  // 0: 未知, 1: 红灯, 2: 绿灯, 3: 黄灯
-   uint8_t remainingTime; // 剩余时间(秒)
- } TrafficLightStatus;
+ // 注意：ObstacleAlert 和 TrafficLightStatus 结构体已在 vision.h 中定义，此处不再重复定义
  
  // 全局变量
  TrafficLightStatus currentTrafficLight = {0, 0};
