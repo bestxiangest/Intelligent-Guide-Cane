@@ -18,18 +18,6 @@
  #include "vision.h"
  #include "voice.h"
  
- // 硬件接口定义
- // 超声波传感器
- #define ULTRASONIC_TRIG_PIN 5
- #define ULTRASONIC_ECHO_PIN 6
- // 振动马达/蜂鸣器提示
- #define VIBRATION_PIN 7
- #define BUZZER_PIN 8
- // 摄像头接口 (ESP32-S3 支持摄像头接口)
- // 使用默认的VSPI接口
- // 录音模块
- #define MIC_PIN 10
- 
  // 任务句柄
  TaskHandle_t ultrasonicTaskHandle = NULL;
  TaskHandle_t visionTaskHandle = NULL;
@@ -43,9 +31,7 @@
  // 互斥锁
  SemaphoreHandle_t i2cMutex = NULL;
  SemaphoreHandle_t spiMutex = NULL;
- 
- // 注意：ObstacleAlert 和 TrafficLightStatus 结构体已在 vision.h 中定义，此处不再重复定义
- 
+
  // 全局变量
  TrafficLightStatus currentTrafficLight = {0, 0};
  
@@ -67,7 +53,8 @@
    pinMode(VIBRATION_PIN, OUTPUT);
    pinMode(BUZZER_PIN, OUTPUT);
    pinMode(MIC_PIN, INPUT);
-   
+   pinMode(VOICE_BUTTON_PIN, INPUT_PULLUP); // 添加语音按钮初始化
+
    // 创建互斥锁
    i2cMutex = xSemaphoreCreateMutex();
    spiMutex = xSemaphoreCreateMutex();
@@ -174,13 +161,28 @@
  
  // 视觉检测任务 (盲道检测)
  void visionTask(void *pvParameters) {
-   // 这里将实现摄像头初始化和盲道检测算法
-   // 由于涉及复杂的图像处理，这里只提供框架
+   // 初始化摄像头
+   if (!initCamera()) {
+     Serial.println("摄像头初始化失败，视觉任务终止");
+     vTaskDelete(NULL);
+     return;
+   }
+   
+   Serial.println("视觉任务启动成功");
    
    for(;;) {
      // 获取图像
-     // 处理图像，检测盲道
-     // 如果偏离盲道，发送警报
+     camera_fb_t *fb = esp_camera_fb_get();
+     
+     if (fb) {
+       // 处理图像，检测盲道
+       detectTactilePaving(fb, alertQueue);
+       
+       // 释放图像缓冲区
+       esp_camera_fb_return(fb);
+     } else {
+       Serial.println("获取图像失败");
+     }
      
      // 每500ms处理一次图像
      vTaskDelay(500 / portTICK_PERIOD_MS);
@@ -189,15 +191,53 @@
  
  // 红绿灯检测任务
  void trafficLightTask(void *pvParameters) {
-   // 这里将实现红绿灯检测算法
-   // 由于涉及复杂的图像处理，这里只提供框架
+   // 等待摄像头初始化完成
+   vTaskDelay(1000 / portTICK_PERIOD_MS);
+   
+   Serial.println("红绿灯检测任务启动");
    
    for(;;) {
      // 获取图像
-     // 处理图像，检测红绿灯
-     // 更新全局红绿灯状态
+     camera_fb_t *fb = esp_camera_fb_get();
      
-     // 如果是红灯，计算剩余时间并提醒用户
+     if (fb) {
+       // 处理图像，检测红绿灯
+       TrafficLightStatus lightStatus = detectTrafficLight(fb);
+       
+       // 更新全局红绿灯状态
+       if (lightStatus.status != 0) {
+         currentTrafficLight = lightStatus;
+         
+         // 如果是红灯，发送警报
+         if (lightStatus.status == 1) {
+           ObstacleAlert alert;
+           alert.type = 5; // 5: 红灯警告
+           alert.distance = 0; // 不适用
+           alert.priority = 2; // 中优先级
+           
+           // 发送到警报队列
+           xQueueSend(alertQueue, &alert, 0);
+           
+           // 输出红绿灯状态
+           Serial.print("检测到红灯，剩余时间: ");
+           Serial.print(lightStatus.remainingTime);
+           Serial.println("秒");
+         } else if (lightStatus.status == 2) {
+           Serial.print("检测到绿灯，剩余时间: ");
+           Serial.print(lightStatus.remainingTime);
+           Serial.println("秒");
+         } else if (lightStatus.status == 3) {
+           Serial.print("检测到黄灯，剩余时间: ");
+           Serial.print(lightStatus.remainingTime);
+           Serial.println("秒");
+         }
+       }
+       
+       // 释放图像缓冲区
+       esp_camera_fb_return(fb);
+     } else {
+       Serial.println("获取图像失败");
+     }
      
      // 每500ms处理一次图像
      vTaskDelay(500 / portTICK_PERIOD_MS);
@@ -206,18 +246,103 @@
  
  // 语音处理任务
  void voiceTask(void *pvParameters) {
-   // 这里将实现录音、语音识别和大模型交互
-   // 由于涉及复杂的网络和API调用，这里只提供框架
+   // 初始化WiFi
+   if (!initWiFi()) {
+     Serial.println("WiFi初始化失败，部分语音功能可能不可用");
+   }
+   
+   // 初始化音频系统
+   if (!initAudio()) {
+     Serial.println("音频系统初始化失败，语音任务终止");
+     vTaskDelete(NULL);
+     return;
+   }
+   
+   Serial.println("语音任务启动成功");
+   
+   // 分配录音缓冲区
+   uint8_t *audioBuffer = (uint8_t *)malloc(RECORD_BUFFER_SIZE);
+   if (!audioBuffer) {
+     Serial.println("无法分配录音缓冲区，语音任务终止");
+     vTaskDelete(NULL);
+     return;
+   }
+   
+   // 语音交互按钮状态
+   bool lastButtonState = HIGH;
+   bool recording = false;
+   uint32_t recordStartTime = 0;
    
    for(;;) {
-     // 检测是否有录音请求（可以通过按钮触发）
-     // 录制语音
-     // 上传到云端进行识别
-     // 将识别结果发送给大模型
-     // 接收大模型回复并播放
+     // 检测是否有录音请求（通过按钮触发）
+     bool currentButtonState = digitalRead(VOICE_BUTTON_PIN);
      
+     // 按钮按下（下降沿）开始录音
+     if (currentButtonState == LOW && lastButtonState == HIGH) {
+       tone(BUZZER_PIN, 800, 100); // 提示音
+       Serial.println("按钮按下，开始录音");
+       recording = true;
+       recordStartTime = millis();
+     }
+     
+     // 按钮释放（上升沿）或录音超时，结束录音并处理
+     if ((recording && currentButtonState == HIGH && lastButtonState == LOW) || 
+         (recording && (millis() - recordStartTime > MAX_RECORD_TIME_MS))) {
+       
+       recording = false;
+       tone(BUZZER_PIN, 1000, 100); // 提示音
+       Serial.println("录音结束，开始处理");
+       
+       // 录制语音
+       size_t audioLength = 0;
+       if (recordAudio(audioBuffer, &audioLength, millis() - recordStartTime)) {
+         // 上传到云端进行识别
+         String recognizedText = speechToText(audioBuffer, audioLength);
+         
+         if (recognizedText.length() > 0) {
+           Serial.println("识别结果: " + recognizedText);
+           
+           // 将识别结果发送给大模型
+           String aiResponse = queryAIModel(recognizedText);
+           
+           // 接收大模型回复并播放
+           playResponse(aiResponse);
+           
+           // 如果识别到特定命令，可以执行相应操作
+           if (recognizedText.indexOf("红绿灯") >= 0) {
+             // 报告当前红绿灯状态
+             String lightInfo = "当前";
+             switch (currentTrafficLight.status) {
+               case 0:
+                 lightInfo += "未检测到红绿灯";
+                 break;
+               case 1:
+                 lightInfo += "是红灯，剩余" + String(currentTrafficLight.remainingTime) + "秒";
+                 break;
+               case 2:
+                 lightInfo += "是绿灯，剩余" + String(currentTrafficLight.remainingTime) + "秒";
+                 break;
+               case 3:
+                 lightInfo += "是黄灯，剩余" + String(currentTrafficLight.remainingTime) + "秒";
+                 break;
+             }
+             playResponse(lightInfo);
+           }
+         } else {
+           Serial.println("语音识别失败");
+           playResponse("抱歉，我没有听清楚");
+         }
+       } else {
+         Serial.println("录音失败");
+       }
+     }
+     
+     lastButtonState = currentButtonState;
      vTaskDelay(100 / portTICK_PERIOD_MS);
    }
+   
+   // 释放资源（实际上永远不会执行到这里）
+   free(audioBuffer);
  }
  
  // 警报任务

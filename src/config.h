@@ -22,12 +22,16 @@
 // 录音模块
 #define MIC_PIN 10
 #define RECORD_BUTTON_PIN 11  // 录音触发按钮
+// 语音按钮引脚
+#define VOICE_BUTTON_PIN 14  // 根据实际硬件连接调整
+// 最大录音时间（毫秒）
+#define MAX_RECORD_TIME_MS 5000  // 5秒
 
 // WiFi配置
-#define WIFI_SSID "YourWiFiSSID"
-#define WIFI_PASSWORD "YourWiFiPassword"
+#define WIFI_SSID "sharp_caterpillar"
+#define WIFI_PASSWORD "11111111"
 
-// API密钥
+// API密钥(语音转文字和AI模型)
 #define SPEECH_API_KEY "YourSpeechToTextAPIKey"
 #define AI_MODEL_API_KEY "YourAIModelAPIKey"
 
