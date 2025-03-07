@@ -34,6 +34,7 @@
 
  // 全局变量
  TrafficLightStatus currentTrafficLight = {0, 0};
+ int lastObstacleDistance = -1; // 存储最近一次检测到的障碍物距离
  
  // 函数声明
  void ultrasonicTask(void *pvParameters);
@@ -135,6 +136,7 @@
      
      // 计算距离 (声速340m/s)
      distance = duration * 0.034 / 2;
+     lastObstacleDistance = distance;
      
      // 如果检测到障碍物
      if (distance < 100) {
@@ -302,15 +304,12 @@
          if (recognizedText.length() > 0) {
            Serial.println("识别结果: " + recognizedText);
            
-           // 将识别结果发送给大模型
-           String aiResponse = queryAIModel(recognizedText);
+           // 处理特定命令
+           bool isSpecialCommand = false;
            
-           // 接收大模型回复并播放
-           playResponse(aiResponse);
-           
-           // 如果识别到特定命令，可以执行相应操作
+           // 红绿灯状态查询
            if (recognizedText.indexOf("红绿灯") >= 0) {
-             // 报告当前红绿灯状态
+             isSpecialCommand = true;
              String lightInfo = "当前";
              switch (currentTrafficLight.status) {
                case 0:
@@ -328,12 +327,46 @@
              }
              playResponse(lightInfo);
            }
+           
+           // 障碍物距离查询
+           else if (recognizedText.indexOf("障碍物") >= 0 || 
+                    recognizedText.indexOf("前方") >= 0 || 
+                    recognizedText.indexOf("距离") >= 0) {
+             isSpecialCommand = true;
+             // 获取最近一次超声波测距结果
+             // 这里需要添加一个全局变量来存储最近的测距结果
+             int lastDistance = 0; // 假设有一个全局变量存储最近的距离
+             String distanceInfo = "前方";
+             if (lastDistance > 0 && lastDistance < 100) {
+               distanceInfo += "有障碍物，距离约" + String(lastDistance) + "厘米";
+             } else {
+               distanceInfo += "暂无障碍物";
+             }
+             playResponse(distanceInfo);
+           }
+           
+           // 位置查询 - 可以在未来集成GPS模块后实现
+           else if (recognizedText.indexOf("我在哪") >= 0 || 
+                    recognizedText.indexOf("位置") >= 0 || 
+                    recognizedText.indexOf("地点") >= 0) {
+             isSpecialCommand = true;
+             playResponse("定位功能尚未实现，请通过大模型查询您的具体位置信息");
+           }
+           
+           // 如果不是特定命令，则发送给大模型处理
+           if (!isSpecialCommand) {
+             // 将识别结果发送给大模型
+             String aiResponse = queryAIModel(recognizedText);
+             
+             // 接收大模型回复并播放
+             playResponse(aiResponse);
+           } else {
+             Serial.println("语音识别失败");
+             playResponse("抱歉，我没有听清楚");
+           }
          } else {
-           Serial.println("语音识别失败");
-           playResponse("抱歉，我没有听清楚");
+           Serial.println("录音失败");
          }
-       } else {
-         Serial.println("录音失败");
        }
      }
      

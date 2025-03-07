@@ -25,7 +25,8 @@
 #define SPEECH_API_ENDPOINT "https://vop.baidu.com/server_api"
 
 // 大模型API端点 (示例使用通用API格式)
-#define AI_MODEL_ENDPOINT "https://api.example.com/v1/chat/completions"
+#define AI_MODEL_ENDPOINT "http://localhost:3001/api/v1/workspace/532b7ee0-3f6a-4f8c-982d-2fcae7d4597b/chat"
+#define AI_MODEL_API_KEY "AZFAJKM-K58MAEK-HXXX4F1-3E4JE8Y"
 
 // 函数声明
 bool initWiFi();
@@ -169,29 +170,30 @@ String queryAIModel(String text) {
     return "网络连接失败，请稍后再试";
   }
   
-  Serial.println("正在查询大模型...");
+  Serial.println("正在查询本地AnythingLLM大模型...");
   
   HTTPClient http;
   http.begin(AI_MODEL_ENDPOINT);
   http.addHeader("Content-Type", "application/json");
+  http.addHeader("accept", "application/json");
   http.addHeader("Authorization", "Bearer " + String(AI_MODEL_API_KEY));
   
-  // 构建请求JSON
+  // 构建请求JSON - 适配AnythingLLM API格式
   StaticJsonDocument<1024> doc;
-  doc["model"] = "gpt-3.5-turbo";
+  doc["message"] = text;
+  doc["mode"] = "chat";
   
-  JsonArray messages = doc.createNestedArray("messages");
+  // 使用设备ID作为会话ID，确保对话连续性
+  String deviceId = String(ESP.getEfuseMac(), HEX);
+  doc["sessionId"] = "esp32-" + deviceId;
   
-  JsonObject systemMessage = messages.createNestedObject();
-  systemMessage["role"] = "system";
-  systemMessage["content"] = "你是一个智能导盲杖上的AI助手，请简洁明了地回答问题，帮助视障人士获取信息。";
-  
-  JsonObject userMessage = messages.createNestedObject();
-  userMessage["role"] = "user";
-  userMessage["content"] = text;
+  // 如果有图像附件，可以在这里添加
+  // 本例中暂不添加图像附件
   
   String requestBody;
   serializeJson(doc, requestBody);
+  
+  Serial.println("发送请求: " + requestBody);
   
   // 发送请求
   int httpCode = http.POST(requestBody);
@@ -201,19 +203,41 @@ String queryAIModel(String text) {
     response = http.getString();
     Serial.println("大模型响应: " + response);
     
-    // 解析响应JSON
+    // 解析响应JSON - 适配AnythingLLM响应格式
     StaticJsonDocument<4096> responseDoc;
     DeserializationError error = deserializeJson(responseDoc, response);
     
     if (!error) {
-      if (responseDoc.containsKey("choices") && responseDoc["choices"].size() > 0) {
-        String aiResponse = responseDoc["choices"][0]["message"]["content"];
+      // 检查是否有错误
+      if (responseDoc.containsKey("error") && responseDoc["error"] != nullptr && responseDoc["error"] != "null") {
+        String errorMsg = responseDoc["error"];
+        Serial.println("大模型返回错误: " + errorMsg);
+        return "系统错误: " + errorMsg;
+      }
+      
+      // 获取文本响应
+      if (responseDoc.containsKey("textResponse")) {
+        String aiResponse = responseDoc["textResponse"];
+        
+        // 记录来源信息（如果需要）
+        if (responseDoc.containsKey("sources") && responseDoc["sources"].size() > 0) {
+          Serial.println("回答来源:");
+          for (JsonObject source : responseDoc["sources"].as<JsonArray>()) {
+            if (source.containsKey("title")) {
+              Serial.println("- " + source["title"].as<String>());
+            }
+          }
+        }
+        
         Serial.println("AI回复: " + aiResponse);
         return aiResponse;
       }
+    } else {
+      Serial.println("JSON解析错误: " + String(error.c_str()));
     }
   } else {
     Serial.printf("大模型请求失败，错误代码: %d\n", httpCode);
+    Serial.println("错误响应: " + http.getString());
   }
   
   http.end();
