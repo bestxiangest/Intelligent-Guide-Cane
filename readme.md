@@ -1,4 +1,4 @@
-# 智能导盲杖系统
+# 星辰引路者——基于ESP32-S3的多模态智能导盲系统
 
 ![智能导盲杖](https://img.shields.io/badge/智能导盲杖-ESP32--S3-blue)
 ![版本](https://img.shields.io/badge/版本-1.0.0-green)
