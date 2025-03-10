@@ -22,6 +22,11 @@
 // 录音模块
 #define MIC_PIN 10
 #define RECORD_BUTTON_PIN 11  // 录音触发按钮
+
+// 视觉处理服务器配置
+#define VISION_SERVER_URL "URL_ADDRESS_vision_server_url.com"
+#define VISION_SERVER_API_KEY "your_api_key_here"  // 如果需要API密钥
+
 // 语音按钮引脚
 #define VOICE_BUTTON_PIN 14  // 根据实际硬件连接调整
 // 最大录音时间（毫秒）

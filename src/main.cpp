@@ -194,26 +194,49 @@ void visionTask(void *pvParameters)
 
   Serial.println("视觉任务启动成功");
 
+  // 上次上传图像的时间
+  uint32_t lastUploadTime = 0;
+
   for (;;)
   {
-    // 获取图像
-    camera_fb_t *fb = esp_camera_fb_get();
-
-    if (fb)
+    uint32_t currentTime = millis();
+    
+    // 检查是否到达上传间隔
+    if (currentTime - lastUploadTime >= IMAGE_UPLOAD_INTERVAL)
     {
-      // 处理图像，检测盲道
-      detectTactilePaving(fb, alertQueue);
+      // 获取图像
+      camera_fb_t *fb = esp_camera_fb_get();
 
-      // 释放图像缓冲区
-      esp_camera_fb_return(fb);
-    }
-    else
-    {
-      Serial.println("获取图像失败");
+      if (fb)
+      {
+        // 上传图像到服务器并获取处理结果
+        VisionResult result = uploadImageForProcessing(fb);
+        
+        // 处理视觉结果并发送警报
+        if (result.success) {
+          processVisionResult(result, alertQueue);
+          
+          // 更新红绿灯状态（如果是红绿灯检测结果）
+          if (result.resultType == 2 && result.status > 0) {
+            currentTrafficLight.status = result.status;
+            currentTrafficLight.remainingTime = result.remainingTime;
+          }
+        }
+
+        // 释放图像缓冲区
+        esp_camera_fb_return(fb);
+        
+        // 更新上次上传时间
+        lastUploadTime = currentTime;
+      }
+      else
+      {
+        Serial.println("获取图像失败");
+      }
     }
 
-    // 每500ms处理一次图像
-    vTaskDelay(500 / portTICK_PERIOD_MS);
+    // 短暂延时，避免CPU占用过高
+    vTaskDelay(100 / portTICK_PERIOD_MS);
   }
 }
 

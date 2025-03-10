@@ -14,6 +14,8 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"  // 添加队列支持
+#include <HTTPClient.h>
+#include <WiFiClient.h>
 
 // 摄像头引脚定义 (ESP32-S3-EYE)
 #define PWDN_GPIO_NUM     -1
@@ -34,21 +36,27 @@
 #define HREF_GPIO_NUM     42
 #define PCLK_GPIO_NUM     5
 
-// 盲道检测参数
-#define TACTILE_PAVING_H_MIN 20   // 黄色盲道的HSV色彩空间最小值
-#define TACTILE_PAVING_H_MAX 40   // 黄色盲道的HSV色彩空间最大值
-#define TACTILE_PAVING_S_MIN 100  // 饱和度最小值
-#define TACTILE_PAVING_S_MAX 255  // 饱和度最大值
-#define TACTILE_PAVING_V_MIN 100  // 亮度最小值
-#define TACTILE_PAVING_V_MAX 255  // 亮度最大值
+// 远程视觉处理服务器API
+#define VISION_API_ENDPOINT "https://dmz.sharpcaterpillar.top/yunsuan"
 
-// 红绿灯检测参数
-#define RED_H_MIN 160    // 红色的HSV色彩空间最小值
-#define RED_H_MAX 180    // 红色的HSV色彩空间最大值
-#define GREEN_H_MIN 50   // 绿色的HSV色彩空间最小值
-#define GREEN_H_MAX 80   // 绿色的HSV色彩空间最大值
-#define YELLOW_H_MIN 20  // 黄色的HSV色彩空间最小值
-#define YELLOW_H_MAX 40  // 黄色的HSV色彩空间最大值
+// 图像压缩质量 (1-100)，数值越低压缩率越高
+#define JPEG_QUALITY 30
+
+// 图像上传间隔 (毫秒)
+#define IMAGE_UPLOAD_INTERVAL 2000
+
+// 视觉处理结果结构体
+typedef struct {
+  bool success;           // 处理是否成功
+  int resultType;         // 结果类型: 1=盲道检测, 2=红绿灯检测, 3=障碍物检测
+  int status;             // 状态码: 盲道(0=未检测到, 1=左侧, 2=中间, 3=右侧)
+                          //        红绿灯(0=未检测到, 1=红灯, 2=绿灯, 3=黄灯)
+                          //        障碍物(0=无障碍, 1=有障碍)
+  int confidence;         // 置信度 (0-100)
+  int distance;           // 距离 (厘米，仅适用于障碍物)
+  int remainingTime;      // 剩余时间 (秒，仅适用于红绿灯)
+  String message;         // 附加信息
+} VisionResult;
 
 // 红绿灯状态结构体 (与主程序中定义一致)
 typedef struct {
@@ -61,6 +69,7 @@ typedef struct {
   uint8_t type;  // 0: 无障碍, 1: 前方障碍, 2: 左侧障碍, 3: 右侧障碍
   uint16_t distance; // 障碍物距离(cm)
   uint8_t priority;  // 警报优先级
+  uint8_t data;
 } ObstacleAlert;
 
 // 函数声明
@@ -68,6 +77,8 @@ bool initCamera();
 void detectTactilePaving(camera_fb_t *fb, QueueHandle_t alertQueue);
 TrafficLightStatus detectTrafficLight(camera_fb_t *fb);
 int estimateRemainingTime(camera_fb_t *fb, uint8_t lightStatus);
+
+bool frameToJpeg(camera_fb_t *fb, uint8_t **jpgBuf, size_t *jpgLen);
 
 // 摄像头初始化函数
 bool initCamera() {
@@ -107,6 +118,51 @@ bool initCamera() {
   
   Serial.println("摄像头初始化成功");
   return true;
+}
+
+// 将图像转换为JPEG格式
+bool frameToJpeg(camera_fb_t *fb, uint8_t **jpgBuf, size_t *jpgLen) {
+  bool ret = false;
+  
+  // 如果已经是JPEG格式，直接使用
+  if (fb->format == PIXFORMAT_JPEG) {
+    *jpgBuf = fb->buf;
+    *jpgLen = fb->len;
+    return true;
+  }
+  
+  // 使用ESP32内置的图像转换函数
+  if (fb->format == PIXFORMAT_RGB565) {
+    Serial.println("将RGB565转换为JPEG...");
+    
+    // 分配JPEG缓冲区 (预估大小)
+    size_t out_buf_len = fb->width * fb->height / 2; // 保守估计
+    uint8_t *out_buf = (uint8_t *)malloc(out_buf_len);
+    if (!out_buf) {
+      Serial.println("分配JPEG缓冲区失败");
+      return false;
+    }
+    
+    // 使用ESP32的图像转换函数
+    bool converted = fmt2jpg(fb->buf, fb->len, fb->width, fb->height, 
+                            PIXFORMAT_RGB565, JPEG_QUALITY, &out_buf,
+                            &out_buf_len);
+    
+    if (converted) {
+      *jpgBuf = out_buf;
+      *jpgLen = out_buf_len;
+      ret = true;
+      Serial.printf("图像转换成功，JPEG大小: %u 字节\n", out_buf_len);
+    } else {
+      Serial.println("JPEG编码失败");
+      free(out_buf);
+    }
+    
+    return ret;
+  }
+  
+  Serial.println("不支持的图像格式");
+  return false;
 }
 
 // 盲道检测函数
@@ -224,6 +280,153 @@ int estimateRemainingTime(camera_fb_t *fb, uint8_t lightStatus) {
       return 5;  // 假设黄灯剩余5秒
     default:
       return 0;
+  }
+}
+
+// 上传图像到远程服务器并获取处理结果
+VisionResult uploadImageForProcessing(camera_fb_t *fb) {
+  VisionResult result = {false, 0, 0, 0, 0, 0, ""};
+  
+  if (!fb) {
+    Serial.println("无效的图像帧");
+    return result;
+  }
+  
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi未连接，无法上传图像");
+    return result;
+  }
+  
+  Serial.println("准备上传图像...");
+  
+  // 将图像转换为JPEG格式
+  uint8_t *jpgBuf = NULL;
+  size_t jpgLen = 0;
+  
+  if (!frameToJpeg(fb, &jpgBuf, &jpgLen)) {
+    Serial.println("图像转换失败");
+    return result;
+  }
+  
+  Serial.printf("图像压缩完成，大小: %u 字节\n", jpgLen);
+  
+  // 创建HTTP客户端
+  HTTPClient http;
+  http.begin(VISION_API_ENDPOINT);
+  http.addHeader("Content-Type", "image/jpeg");
+  http.addHeader("X-Device-ID", String(ESP.getEfuseMac(), HEX));
+  http.addHeader("X-Image-Width", String(fb->width));
+  http.addHeader("X-Image-Height", String(fb->height));
+  
+  // 上传图像
+  int httpCode = http.POST(jpgBuf, jpgLen);
+  
+  // 如果图像缓冲区是新分配的，释放它
+  if (jpgBuf != fb->buf) {
+    free(jpgBuf);
+  }
+  
+  // 处理响应
+  if (httpCode == HTTP_CODE_OK) {
+    String response = http.getString();
+    Serial.println("服务器响应: " + response);
+    
+    // 解析JSON响应
+    DynamicJsonDocument doc(1024);
+    DeserializationError error = deserializeJson(doc, response);
+    
+    if (!error) {
+      result.success = true;
+      result.resultType = doc["resultType"].as<int>();
+      result.status = doc["status"].as<int>();
+      result.confidence = doc["confidence"].as<int>();
+      
+      // 根据结果类型解析特定字段
+      if (result.resultType == 1) {
+        // 盲道检测结果
+        Serial.printf("盲道检测结果: 状态=%d, 置信度=%d%%\n", 
+                     result.status, result.confidence);
+      } 
+      else if (result.resultType == 2) {
+        // 红绿灯检测结果
+        result.remainingTime = doc["remainingTime"].as<int>();
+        Serial.printf("红绿灯检测结果: 状态=%d, 剩余时间=%d秒, 置信度=%d%%\n", 
+                     result.status, result.remainingTime, result.confidence);
+      } 
+      else if (result.resultType == 3) {
+        // 障碍物检测结果
+        result.distance = doc["distance"].as<int>();
+        Serial.printf("障碍物检测结果: 状态=%d, 距离=%dcm, 置信度=%d%%\n", 
+                     result.status, result.distance, result.confidence);
+      }
+      
+      if (doc.containsKey("message")) {
+        result.message = doc["message"].as<String>();
+      }
+    } else {
+      Serial.println("JSON解析错误: " + String(error.c_str()));
+    }
+  } else {
+    Serial.printf("图像上传失败，错误代码: %d\n", httpCode);
+    Serial.println("错误响应: " + http.getString());
+  }
+  
+  http.end();
+  return result;
+}
+
+// 处理视觉结果并发送警报
+void processVisionResult(VisionResult result, QueueHandle_t alertQueue) {
+  if (!result.success) {
+    return;
+  }
+  
+  ObstacleAlert alert;
+  
+  // 根据结果类型处理
+  switch (result.resultType) {
+    case 1: // 盲道检测
+      if (result.status != 2) { // 不在盲道中间
+        alert.type = 2; // 盲道偏离警报
+        alert.distance = 0;
+        alert.priority = 1; // 低优先级
+        
+        if (result.status == 0) { // 未检测到盲道
+          alert.priority = 2; // 中优先级
+        }
+        
+        xQueueSend(alertQueue, &alert, 0);
+      }
+      break;
+      
+    case 2: // 红绿灯检测
+      if (result.status == 1) { // 红灯
+        alert.type = 5; // 红灯警告
+        alert.distance = 0;
+        alert.priority = 2; // 中优先级
+        alert.data = result.remainingTime; // 存储剩余时间
+        
+        xQueueSend(alertQueue, &alert, 0);
+      }
+      break;
+      
+    case 3: // 障碍物检测
+      if (result.status == 1) { // 有障碍物
+        alert.type = 1; // 前方障碍
+        alert.distance = result.distance;
+        
+        // 根据距离设置优先级
+        if (result.distance < 30) {
+          alert.priority = 3; // 高优先级
+        } else if (result.distance < 60) {
+          alert.priority = 2; // 中优先级
+        } else {
+          alert.priority = 1; // 低优先级
+        }
+        
+        xQueueSend(alertQueue, &alert, 0);
+      }
+      break;
   }
 }
 
