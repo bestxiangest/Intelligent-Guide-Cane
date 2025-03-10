@@ -43,4 +43,16 @@
 #define VOICE_RECORD_TIME 5000           // 录音时长(ms)
 #define VOICE_SAMPLE_RATE 16000          // 录音采样率(Hz)
 
+// 高德地图API配置
+#define AMAP_API_KEY "06ab3ec992282fb5e6d3c5bb9604af7f"
+#define DEFAULT_LOCATION "115.867661,28.743242"  // 默认位置：华东交通大学
+
+// 百度语音API配置
+#define BAIDU_API_KEY "gPm0ytVOuc9VpDkktWaoUEIC"
+#define BAIDU_SECRET_KEY "z9IPnBfz0T7cCaxMsbRshKygDBw98Tuy"
+#define BAIDU_CUID "HlZ34c0WcG3drqdK14kHEOcjagqCCUgV"
+
+// 心知天气API配置
+#define WEATHER_API_KEY "SOEpTH9jt8GySfKdM"
+
 #endif // CONFIG_H
