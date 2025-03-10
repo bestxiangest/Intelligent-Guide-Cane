@@ -196,10 +196,10 @@ String queryAIModel(String text)
   Serial.println("正在查询AnythingLLM大模型...");
 
   HTTPClient http;
-  http.begin("http://localhost:3001/api/v1/workspace/532b7ee0-3f6a-4f8c-982d-2fcae7d4597b/chat");
+  http.begin("http://localhost:3001/api/v1/workspace/<Your Key>/chat");
   http.addHeader("Content-Type", "application/json");
   http.addHeader("accept", "application/json");
-  http.addHeader("Authorization", "Bearer AZFAJKM-K58MAEK-HXXX4F1-3E4JE8Y");
+  http.addHeader("Authorization", "Bearer <Your Key>");
 
   // 构建请求JSON
   StaticJsonDocument<2048> doc;
