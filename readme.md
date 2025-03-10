@@ -52,7 +52,7 @@
 ## 安装与编译
 
 1. 安装[PlatformIO IDE](https://platformio.org/platformio-ide)（基于VSCode）
-2. 克隆本仓库：git clone https://github.com/yourusername/intelligent-guide-cane.git
+2. 克隆本仓库：git clone https://github.com/bestxiangest/intelligent-guide-cane.git
 3. 打开PlatformIO IDE，导入项目
 4. 配置`config.h`文件中的API密钥和WiFi信息
 5. 编译并上传到ESP32-S3开发板
