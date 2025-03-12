@@ -13,6 +13,7 @@
 #include <base64.h>
 #include <I2S.h>
 #include "weather.h"
+#include "navigation.h"
 
 // I2S配置 (用于高质量音频录制)
 #define I2S_WS_PIN 12

@@ -20,21 +20,20 @@
 #include "navigation.h"
 
 // 任务句柄
-TaskHandle_t ultrasonicTaskHandle = NULL;
-TaskHandle_t visionTaskHandle = NULL;
-TaskHandle_t trafficLightTaskHandle = NULL;
-TaskHandle_t voiceTaskHandle = NULL;
-TaskHandle_t alertTaskHandle = NULL;
+TaskHandle_t ultrasonicTaskHandle = NULL;   // 超声波测距任务
+TaskHandle_t visionTaskHandle = NULL;       // 视觉任务
+TaskHandle_t voiceTaskHandle = NULL;        // 语音任务
+TaskHandle_t alertTaskHandle = NULL;        // 警报任务
 
 // 队列句柄
 QueueHandle_t alertQueue = NULL;
 
-// 互斥锁
+// 互斥锁，目前用不到。确保在任意时刻只有一个任务可以访问I2C和SPI。
 SemaphoreHandle_t i2cMutex = NULL;
 SemaphoreHandle_t spiMutex = NULL;
 
 // 全局变量
-TrafficLightStatus currentTrafficLight = {0, 0};
+TrafficLightStatus currentTrafficLight = {0, 0};  // 当前红绿灯状态
 int lastObstacleDistance = -1; // 存储最近一次检测到的障碍物距离
 
 NavigationRoute currentRoute;  // 当前导航路线
@@ -44,7 +43,6 @@ int currentStepIndex = 0;      // 当前导航步骤索引
 // 函数声明
 void ultrasonicTask(void *pvParameters);   // 超声波测距任务
 void visionTask(void *pvParameters);       // 视觉任务
-void trafficLightTask(void *pvParameters); // 红绿灯检测任务
 void voiceTask(void *pvParameters);        // 语音任务
 void alertTask(void *pvParameters);        // 警报任务
 void navigationTask(void *pvParameters);   // 导航任务
@@ -71,7 +69,7 @@ void setup()
   alertQueue = xQueueCreate(10, sizeof(ObstacleAlert));
 
   // 创建任务
-  xTaskCreate(
+  xTaskCreate(     
       ultrasonicTask,
       "UltrasonicTask",
       4096,
@@ -79,21 +77,13 @@ void setup()
       1,
       &ultrasonicTaskHandle);
 
-  xTaskCreate(
+  xTaskCreate(      
       visionTask,
       "VisionTask",
       8192, // 视觉任务需要更多内存
       NULL,
       1,
       &visionTaskHandle);
-
-  xTaskCreate(
-      trafficLightTask,
-      "TrafficLightTask",
-      8192, // 视觉任务需要更多内存
-      NULL,
-      1,
-      &trafficLightTaskHandle);
 
   xTaskCreate(
       voiceTask,
@@ -200,7 +190,7 @@ void visionTask(void *pvParameters)
   for (;;)
   {
     uint32_t currentTime = millis();
-    
+
     // 检查是否到达上传间隔
     if (currentTime - lastUploadTime >= IMAGE_UPLOAD_INTERVAL)
     {
@@ -211,13 +201,15 @@ void visionTask(void *pvParameters)
       {
         // 上传图像到服务器并获取处理结果
         VisionResult result = uploadImageForProcessing(fb);
-        
+
         // 处理视觉结果并发送警报
-        if (result.success) {
+        if (result.success)
+        {
           processVisionResult(result, alertQueue);
-          
+
           // 更新红绿灯状态（如果是红绿灯检测结果）
-          if (result.resultType == 2 && result.status > 0) {
+          if (result.resultType == 2 && result.status > 0)
+          {
             currentTrafficLight.status = result.status;
             currentTrafficLight.remainingTime = result.remainingTime;
           }
@@ -225,7 +217,7 @@ void visionTask(void *pvParameters)
 
         // 释放图像缓冲区
         esp_camera_fb_return(fb);
-        
+
         // 更新上次上传时间
         lastUploadTime = currentTime;
       }
