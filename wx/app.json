@@ -1,0 +1,37 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/video/video"
+  ],
+  "tabBar": {
+      "list": [
+          {
+              "pagePath": "pages/index/index",
+              "text": "地图",
+              "iconPath": "images/map.png"
+          },
+          {
+              "pagePath": "pages/video/video",
+              "text": "视频",
+              "iconPath":"images/video.png"
+          }
+      ]
+  },
+  "window": {
+    "navigationBarTextStyle": "black",
+    "navigationStyle": "custom"
+  },
+  "style": "v2",
+  "componentFramework": "glass-easel",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents",
+  "permission": {
+    "scope.userLocation": {
+      "desc": "你的位置信息将用于小程序定位"
+    }
+  },
+  "requiredPrivateInfos": [
+    "getLocation"
+  ]
+
+}

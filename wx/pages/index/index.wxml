@@ -1,0 +1,68 @@
+<view class="map_container">
+  <map class="map" id="map" 
+  longitude="{{longitude}}" latitude="{{latitude}}" 
+  scale="{{scale}}" 
+  show-location="true" 
+  markers="{{markers}}"
+  bindtap="makertap"
+  bindmarkertap="makertap"
+  polyline="{{polyline}}"
+  include-points="{{points}}"
+  enable-3D
+  show-compass
+  show-scale
+  enable-poi
+  enable-traffic></map>
+  <image
+  src="../../images/stick.png"
+  class="blind"
+  bind:tap="to_blind"
+  mode="aspectFit"
+  hover-class="image-hover">
+</image>
+  <image
+  src="../../images/current_position.png"
+  class="currtenPosition"
+  bind:tap="toMyposition"
+  mode="aspectFit"
+  hover-class="image-hover">
+  </image>
+</view>
+
+<view class="map_text">
+  <view class="header-section">
+    <text class="h1">{{textData.name}}</text>
+    <text class="desc-text">{{textData.desc}}</text>
+  </view>
+  
+  <view class="input__">
+    <input 
+      placeholder="请输入地址" 
+      bindchange="inputAddress"
+      class="input-field"
+      placeholder-class="placeholder-style"
+    />
+    <button 
+      bind:tap="navigation"
+      class="nav-button"
+      hover-class="button-hover"
+    >{{navigating ? "结束导航" : "导航"}}</button>
+  </view>
+
+  <view class="scroll-wrapper">
+    <scroll-view class="scroll-container" scroll-y>
+      <view wx:if="{{!navigating}}" wx:for="{{markers}}" wx:key="id" 
+        class="marker-item" 
+        bindtap="toSelected"
+        hover-class="item-hover"
+      >{{item.name}}</view>
+      
+      <view wx:if="{{navigating}}" wx:for="{{steps}}" wx:key="id"
+        class="navigation-item"
+        hover-class="item-hover"
+      >
+      <text>{{item.instruction}}</text>
+      </view>
+    </scroll-view>
+  </view>
+</view>

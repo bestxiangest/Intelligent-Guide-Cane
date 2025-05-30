@@ -1,0 +1,7 @@
+<view class="container">
+    <image 
+    src="http://60.215.128.117:64076/stream"
+  mode="widthFix" 
+  style="width: 100%;" 
+></image>
+</view>

@@ -1,0 +1,13 @@
+/* 父容器：使用 flex 布局让内容垂直水平居中 */
+.container {
+    display: flex;
+    justify-content: center; /* 水平居中 */
+    align-items: center; /* 垂直居中 */
+    min-height: 100vh; /*占满视口高度，确保垂直居中生效*/
+  }
+  
+  /* 图片样式：限制最大宽度，高度自动适配（保证等比例） */
+  .img {
+    max-width: 99%; /* 可根据需求调整最大宽度，如 70%、90% 等 */
+    height: auto;
+  }
