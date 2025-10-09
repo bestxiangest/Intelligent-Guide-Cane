@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>简单聊天室</title>
+    <style>
+        #chat-box { height: 400px; border: 1px solid #ccc; overflow-y: scroll; padding: 10px; }
+        .message { margin: 5px 0; }
+        .user { color: #666; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="chat-box"></div>
+    <input type="text" id="message-input" placeholder="输入消息...">
+    <button onclick="sendMessage()">发送</button>
+
+    <!-- Socket.IO 客户端库 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <script>
+        // 连接服务器
+        const socket = io.connect('http://' + document.domain + ':' + location.port);
+
+        // 接收消息
+        socket.on('receive_message', function(data) {
+            const chatBox = document.getElementById('chat-box');
+            const messageElement = document.createElement('div');
+            messageElement.className = 'message';
+            messageElement.innerHTML = `<span class="user">${data.user}:</span> ${data.msg}`;
+            chatBox.appendChild(messageElement);
+            chatBox.scrollTop = chatBox.scrollHeight; // 自动滚动到底部
+        });
+
+        // 发送消息
+        function sendMessage() {
+            const input = document.getElementById('message-input');
+            const message = input.value.trim();
+            if (message) {
+                socket.emit('send_message', {
+                    msg: message,
+                    user: '用户' + Math.floor(Math.random() * 1000)  // 简单随机用户名
+                });
+                input.value = '';
+            }
+        }
+
+        // 回车发送
+        document.getElementById('message-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') sendMessage();
+        });
+    </script>
+</body>
+</html>
