@@ -50,8 +50,8 @@ void gpsInit()
 
     GpsSerial.begin(115200); // 定义波特率9600
     DebugSerial.begin(115200);
-    DebugSerial.println("waaax_tek");
-    DebugSerial.println("Wating...");
+    ei_printf("waaax_tek");
+    ei_printf("Wating...");
 
     Save_Data.isGetData = false;
     Save_Data.isParseData = false;
@@ -63,8 +63,8 @@ void gpsInit()
 // 错误记录
 void errorLog(int num)
 {
-    DebugSerial.print("ERROR");
-    DebugSerial.println(num);
+    ei_printf("ERROR");
+    ei_printf("%d", num);
     while (1)
     {
         digitalWrite(L, HIGH);
@@ -81,24 +81,24 @@ void printGpsBuffer()
     {
         Save_Data.isParseData = false;
 
-        DebugSerial.print("Save_Data.UTCTime = ");
-        DebugSerial.println(Save_Data.UTCTime);
+        ei_printf("Save_Data.UTCTime = ");
+        ei_printf(Save_Data.UTCTime);
 
         if (Save_Data.isUsefull)
         {
             Save_Data.isUsefull = false;
-            DebugSerial.print("Save_Data.latitude = ");
-            DebugSerial.println(Save_Data.latitude); // 纬度
-            DebugSerial.print("Save_Data.N_S = ");
-            DebugSerial.println(Save_Data.N_S);
-            DebugSerial.print("Save_Data.longitude = "); // 经度
-            DebugSerial.println(Save_Data.longitude);
-            DebugSerial.print("Save_Data.E_W = ");
-            DebugSerial.println(Save_Data.E_W);
+            ei_printf("Save_Data.latitude = ");
+            ei_printf(Save_Data.latitude); // 纬度
+            ei_printf("Save_Data.N_S = ");
+            ei_printf(Save_Data.N_S);
+            ei_printf("Save_Data.longitude = "); // 经度
+            ei_printf(Save_Data.longitude);
+            ei_printf("Save_Data.E_W = ");
+            ei_printf(Save_Data.E_W);
         }
         else
         {
-            DebugSerial.println("GPS DATA is not usefull!");
+            ei_printf("GPS DATA is not usefull!");
         }
     }
 }
@@ -111,8 +111,8 @@ void parseGpsBuffer()
     if (Save_Data.isGetData)
     {
         Save_Data.isGetData = false;
-        DebugSerial.println("**************");
-        DebugSerial.println(Save_Data.GPS_Buffer);
+        ei_printf("**************");
+        ei_printf(Save_Data.GPS_Buffer);
 
         for (int i = 0; i <= 6; i++)
         {

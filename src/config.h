@@ -27,17 +27,17 @@
 #define GPS_TASK_PRIORITY 1
 
 // 定义任务栈大小
-#define ULTRASONIC_TASK_STACK_SIZE 2048
+#define ULTRASONIC_TASK_STACK_SIZE 4096  // 增加栈大小解决UltrasonicTask栈溢出问题
 #define BUTTON_TASK_STACK_SIZE 2048
-#define LIGHT_SENSOR_TASK_STACK_SIZE 2048
+#define LIGHT_SENSOR_TASK_STACK_SIZE 4096  // 增加栈大小解决栈溢出问题
 #define GPS_TASK_STACK_SIZE 2048
 #define VOICE_TASK_STACK_SIZE 1024 * 32 // 语音处理需要更大的栈
 #define VIBRATION_MODULE_PIN 3
 
 // 硬件接口定义
-// 超声波传感器
-#define ULTRASONIC_TRIG_PIN 5
-#define ULTRASONIC_ECHO_PIN 6
+// 超声波传感器 (修改引脚避免ESP32-S3内部SPI flash/PSRAM冲突)
+#define ULTRASONIC_TRIG_PIN 8   // 改为GPIO8 (可用引脚，避免冲突)
+#define ULTRASONIC_ECHO_PIN 18  // 改为GPIO18 (可用引脚，避免冲突)  
 
 // 光敏传感器 (AO=9, DO=10)
 #define LIGHT_SENSOR_AO_PIN 9  // 模拟输出引脚 (本次未使用)
@@ -67,16 +67,21 @@
 #define BAIDU_CLIENT_SECRET "z9IPnBfz0T7cCaxMsbRshKygDBw98Tuy"
 
 // 其他配置参数
-#define OBSTACLE_DISTANCE_THRESHOLD 100 // 障碍物检测阈值(cm)
-#define HIGH_PRIORITY_DISTANCE 30       // 高优先级距离(cm)
-#define MEDIUM_PRIORITY_DISTANCE 60     // 中优先级距离(cm)
+#define OBSTACLE_DISTANCE_THRESHOLD 20 // 障碍物检测阈值(cm)
+#define HIGH_PRIORITY_DISTANCE 8       // 高优先级距离(cm)
+#define MEDIUM_PRIORITY_DISTANCE 15     // 中优先级距离(cm)
+
+// 超声波调试配置
+#define ULTRASONIC_DEBUG_MODE true      // 启用超声波详细调试信息
+#define ULTRASONIC_MAX_DISTANCE 500     // 最大测量距离(cm)
+#define ULTRASONIC_MIN_DISTANCE 0.5     // 最小测量距离(cm)
 
 #define VOICE_RECORD_TIME 5000  // 录音时长(ms)
 #define VOICE_SAMPLE_RATE 16000 // 录音采样率(Hz)
 
 // 高德地图API配置
 #define AMAP_API_KEY "YourAmapAPIKey"
-#define DEFAULT_LOCATION "115.867661,28.743242" // 默认位置：华东交通大学
+#define DEFAULT_LOCATION "120.0593138888889,30.310658333333332" 
 
 // 百度语音API配置
 #define BAIDU_API_KEY "YourBaiduAPIKey"

@@ -7,8 +7,8 @@ i2s_config_t i2sIn_config = {
     .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
     .communication_format = i2s_comm_format_t(I2S_COMM_FORMAT_STAND_I2S),
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 8,
-    .dma_buf_len = 1024};
+    .dma_buf_count = 4,
+    .dma_buf_len = 512};
 
 const i2s_pin_config_t i2sIn_pin_config = {
     .bck_io_num = INMP441_SCK,
@@ -23,7 +23,7 @@ i2s_config_t i2sOut_config = {
     .channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT,
     .communication_format = i2s_comm_format_t(I2S_COMM_FORMAT_STAND_I2S),
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 8,
+    .dma_buf_count = 6,
     .dma_buf_len = 1024};
 
 const i2s_pin_config_t i2sOut_pin_config = {
@@ -35,13 +35,53 @@ const i2s_pin_config_t i2sOut_pin_config = {
 // 初始化I2S
 void set_i2s()
 {
-  // 初始化i2s
-  i2s_driver_install(I2S_NUM_0, &i2sIn_config, 0, NULL);
-  i2s_set_pin(I2S_NUM_0, &i2sIn_pin_config);
-
-  i2s_driver_install(I2S_NUM_1, &i2sOut_config, 0, NULL);
-  i2s_set_pin(I2S_NUM_1, &i2sOut_pin_config);
+  esp_err_t err;
   
+  // 先卸载可能存在的I2S驱动
+  i2s_driver_uninstall(I2S_NUM_0);
+  i2s_driver_uninstall(I2S_NUM_1);
+  
+  // 添加延迟确保驱动完全卸载
+  vTaskDelay(pdMS_TO_TICKS(100));
+  
+  // 初始化I2S输入 (麦克风)
+  Serial.println("正在初始化I2S输入驱动...");
+  err = i2s_driver_install(I2S_NUM_0, &i2sIn_config, 0, NULL);
+  if (err != ESP_OK) {
+    Serial.printf("I2S输入驱动安装失败: %s\n", esp_err_to_name(err));
+    return;
+  }
+  
+  err = i2s_set_pin(I2S_NUM_0, &i2sIn_pin_config);
+  if (err != ESP_OK) {
+    Serial.printf("I2S输入引脚配置失败: %s\n", esp_err_to_name(err));
+    return;
+  }
+  Serial.println("I2S输入驱动初始化成功");
+  
+  // 添加延迟
+  vTaskDelay(pdMS_TO_TICKS(50));
+  
+  // 初始化I2S输出 (扬声器)
+  Serial.println("正在初始化I2S输出驱动...");
+  err = i2s_driver_install(I2S_NUM_1, &i2sOut_config, 0, NULL);
+  if (err != ESP_OK) {
+    Serial.printf("I2S输出驱动安装失败: %s\n", esp_err_to_name(err));
+    return;
+  }
+  
+  err = i2s_set_pin(I2S_NUM_1, &i2sOut_pin_config);
+  if (err != ESP_OK) {
+    Serial.printf("I2S输出引脚配置失败: %s\n", esp_err_to_name(err));
+    return;
+  }
+  Serial.println("I2S输出驱动初始化成功");
+  
+  // 清空DMA缓冲区
+  i2s_zero_dma_buffer(I2S_NUM_0);
+  i2s_zero_dma_buffer(I2S_NUM_1);
+  
+  Serial.println("I2S音频系统初始化完成");
 }
 
 // 播放声音
@@ -51,9 +91,32 @@ void playAudio(uint8_t *audioData, size_t audioDataSize)
 {
   if (audioDataSize > 0)
   {
-    // 发送
     size_t bytes_written = 0;
-    i2s_write(I2S_NUM_1, (int16_t *)audioData, audioDataSize, &bytes_written, portMAX_DELAY);
+    size_t total_written = 0;
+    
+    // 确保所有数据都被写入
+    while (total_written < audioDataSize)
+    {
+      esp_err_t result = i2s_write(I2S_NUM_1, 
+                                   (int16_t *)(audioData + total_written), 
+                                   audioDataSize - total_written, 
+                                   &bytes_written, 
+                                   pdMS_TO_TICKS(100));
+      
+      if (result != ESP_OK)
+      {
+        Serial.printf("[音频播放] I2S写入错误: %s\n", esp_err_to_name(result));
+        break;
+      }
+      
+      total_written += bytes_written;
+      
+      // 如果没有写入任何数据，稍作延迟避免忙等待
+      if (bytes_written == 0)
+      {
+        vTaskDelay(pdMS_TO_TICKS(1));
+      }
+    }
   }
 }
 
@@ -83,59 +146,87 @@ void playAudio_fromBase64(uint8_t *decode_data, const char *note)
 // 获取百度云平台的AccessToken
 String getAccessToken_baidu()
 {
-  // WiFiClient client;
-
+  Serial.println("[语音服务] 开始获取百度AccessToken...");
+  
   // 创建安全客户端
   WiFiClientSecure *client = new WiFiClientSecure;
   if (!client)
   {
-    Serial.println("Unable to create client");
-    return " ";
+    Serial.println("[语音服务] 错误：无法创建HTTPS客户端");
+    return "";
   }
+  
   // 跳过证书验证
   client->setInsecure();
-
+  
+  // 设置连接超时
+  client->setTimeout(10); // 10秒超时
+  
   // 创建HTTP客户端
   HTTPClient https;
-  // HTTPClient http;
   String accessToken = "";
 
-  String url = "https://aip.baidubce.com/oauth/2.0/token";
-  String grantType = "client_credentials";
-
-  // String fullUrl = url + "?client_id=" + BAIDU_CLIENT_ID + "&client_secret=" + BAIDU_CLIENT_SECRET + "&grant_type=" + grantType;
   // 百度API请求地址
   const char *target_url = "https://aip.baidubce.com/oauth/2.0/token?client_id=gPm0ytVOuc9VpDkktWaoUEIC&client_secret=z9IPnBfz0T7cCaxMsbRshKygDBw98Tuy&grant_type=client_credentials";
+  
+  Serial.println("[语音服务] 连接到百度API服务器...");
   https.begin(*client, target_url);
-
+  
+  // 设置HTTP超时
+  https.setTimeout(10000); // 10秒超时
+  
   https.addHeader("Content-Type", "application/json");
-  https.addHeader("Accept", "application/json"); // 设置Accept头部
+  https.addHeader("Accept", "application/json");
 
   // 构造空JSON字符串负载
-  String payload = "\"\"";            // 对应Python中的json.dumps("")
-  int httpCode = https.POST(payload); // 发送POST请求
+  String payload = "\"\"";
+  
+  // Serial.println("[语音服务] 发送POST请求...");
+  int httpCode = https.POST(payload);
+  
+  // Serial.printf("[语音服务] HTTP响应代码: %d\n", httpCode);
 
   if (httpCode > 0)
   {
     if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY)
     {
       String response = https.getString();
-      DynamicJsonDocument doc(1024); // 根据实际返回数据大小调整
-      deserializeJson(doc, response);
-      accessToken = doc["access_token"].as<String>();
-      Serial.println("获取AccessToken成功: " + accessToken);
+      // Serial.println("[语音服务] 收到响应: " + response);
+      
+      DynamicJsonDocument doc(1024);
+      DeserializationError error = deserializeJson(doc, response);
+      
+      if (error) {
+        Serial.printf("[语音服务] JSON解析错误: %s\n", error.c_str());
+      } else {
+        accessToken = doc["access_token"].as<String>();
+        if (accessToken.length() > 0) {
+          Serial.println("[语音服务] ✓ 获取AccessToken成功");
+        } else {
+          Serial.println("[语音服务] 错误：响应中没有access_token");
+        }
+      }
     }
     else
     {
-      Serial.printf("[HTTP] GET... failed, error: %s\n", https.errorToString(httpCode).c_str());
+      Serial.printf("[语音服务] HTTP请求失败，错误代码: %d, 错误信息: %s\n", 
+                    httpCode, https.errorToString(httpCode).c_str());
     }
   }
   else
   {
-    Serial.printf("[HTTP] Unable to connect\n");
+    Serial.printf("[语音服务] 连接失败，错误代码: %d, 错误信息: %s\n", 
+                  httpCode, https.errorToString(httpCode).c_str());
   }
+  
   https.end();
   delete client;
+  
+  if (accessToken.length() == 0) {
+    Serial.println("[语音服务] ✗ AccessToken获取失败，语音服务将无法使用");
+  }
+  Serial.println("token为:" + accessToken);
+
   return accessToken;
 }
 
@@ -403,7 +494,7 @@ void baiduTTS_Send(String access_token, String text)
       {
         Serial.println("合成成功");
 
-        uint8_t buffer[128] = {0}; // Increased buffer size for smoother playback
+        uint8_t buffer[1024] = {0}; // 增大缓冲区以减少卡顿
         size_t bytesRead = 0;
 
         int len = http.getSize(); // 读取响应正文数据字节数，如果返回-1是因为响应头中没有Content-Length属性
@@ -421,8 +512,13 @@ void baiduTTS_Send(String access_token, String text)
             {
               len -= c;
             }
+            // 增加延迟以确保I2S有足够时间处理数据
+            vTaskDelay(pdMS_TO_TICKS(10));
           }
-          delay(1);
+          else
+          {
+            vTaskDelay(pdMS_TO_TICKS(1));
+          }
         }
 
         // Flush and stop I2S after all data is processed
@@ -486,7 +582,7 @@ void CosyVoice_Send(String textToSynthesize)
       {
         Serial.println("合成成功");
 
-        uint8_t buffer[128] = {0}; // Increased buffer size for smoother playback
+        uint8_t buffer[1024] = {0}; // 增大缓冲区以减少卡顿
         size_t bytesRead = 0;
 
         int len = http.getSize(); // 读取响应正文数据字节数，如果返回-1是因为响应头中没有Content-Length属性
@@ -504,8 +600,13 @@ void CosyVoice_Send(String textToSynthesize)
             {
               len -= c;
             }
+            // 增加延迟以确保I2S有足够时间处理数据
+            vTaskDelay(pdMS_TO_TICKS(10));
           }
-          delay(1);
+          else
+          {
+            vTaskDelay(pdMS_TO_TICKS(1));
+          }
         }
 
         // Flush and stop I2S after all data is processed

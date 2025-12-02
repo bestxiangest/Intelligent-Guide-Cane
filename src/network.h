@@ -11,10 +11,11 @@
 #include "config.h"     // 项目配置文件
 
 void initWiFi();     // 初始化WiFi连接
+void diagnoseWiFiConnection(); // WiFi网络诊断
 
 // 上传PCM数据到服务端
 void uploadPcmData(String serverUrl, uint8_t *audioData, int audioDataSize);
 // 发送文本到服务端AI接口
 String sendTextToServer(String text);
-void sendGpsData(float latitude, float longitude); // 新增：发送GPS数据的函数声明
+bool sendGpsData(float latitude, float longitude); // 新增：发送GPS数据的函数声明
 #endif
