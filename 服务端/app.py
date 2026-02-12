@@ -14,15 +14,15 @@ app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False  # 确保 jsonify 返回的 JSON 中文字符不被转义
 
 # 和风天气API密钥 (请替换为您自己的API密钥)
-QWEATHER_API_KEY = "3f71fd1e04a045f2a1996eb7c1f4302c"
+QWEATHER_API_KEY = ""
 
 # 阿里云API KEY
-AL_API_KEY = 'sk-dcbb7246ac3f402994454b91120b95ab'
+AL_API_KEY = 'sk-'
 dashscope.api_key = AL_API_KEY
 
 # 高德地图API配置
-AMAP_API_KEY = "06ab3ec992282fb5e6d3c5bb9604af7f"
-DEFAULT_LOCATION = "120.07275000000001,30.30828611111111"  # 默认位置
+AMAP_API_KEY = ""
+DEFAULT_LOCATION = "120,30"  # 默认位置
 
 # 用于存储每个用户的对话历史和上次交互时间
 conversations = {}
@@ -651,3 +651,4 @@ def exit_navigation():
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=12345)
+
