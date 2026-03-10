@@ -309,13 +309,13 @@
 
 | 用途     | 当前代码中的地址 | 所在文件（约） |
 |----------|------------------|----------------|
-| AI 对话  | `http://101.132.166.117:12345/ai` | network.cpp |
-| GPS 上报 | `http://101.132.166.117:12345/gps` | network.cpp |
-| 导航更新 | `http://101.132.166.117:12345/navigation_update` | main.cpp |
-| 退出导航 | `http://101.132.166.117:12345/exit_navigation` | main.cpp |
+| AI 对话  | `http://my_ip:12345/ai` | network.cpp |
+| GPS 上报 | `http://my_ip:12345/gps` | network.cpp |
+| 导航更新 | `http://my_ip:12345/navigation_update` | main.cpp |
+| 退出导航 | `http://my_ip:12345/exit_navigation` | main.cpp |
 
 - **语音合成**：当前实现为**硬件端直接请求百度云语音合成 API**（`voice.cpp` 中的 `baiduTTS_Send`，请求 `https://tsn.baidu.com/text2audio`），**不经过自建服务器**。只需在 `config.h` 中配置 `BAIDU_CLIENT_ID`、`BAIDU_CLIENT_SECRET`，并在运行时通过百度接口获取 access_token 即可。服务端（`web/app.py`）未提供、也未使用语音合成接口。
-- 克隆项目后若使用**自己的服务器**：在 `src/network.cpp` 和 `src/main.cpp` 中搜索 `101.132.166.117`，将 IP 与端口改为你的服务地址（端口 12345）。  
+- 克隆项目后若使用**自己的服务器**：在 `src/network.cpp` 和 `src/main.cpp` 中搜索 `my_ip`，将 IP 与端口改为你的服务地址（端口 12345）。  
 - **百度语音**（识别 + 合成）均在硬件端通过百度云 API 完成，在 `config.h` 中配置自己的 `BAIDU_CLIENT_ID`、`BAIDU_CLIENT_SECRET` 等即可。
 
 ---
@@ -388,7 +388,7 @@ ESP32 要访问的是「电脑在当前 WiFi（热点）下的 IP」，必须在
 
 **1）`硬件端/src/network.cpp`**
 
-- 搜索 `101.132.166.117`，会看到两处：
+- 搜索 `my_ip`，会看到两处：
   - 一处是 **AI 对话**的地址（`/ai`），
   - 一处是 **GPS 上报**的地址（`/gps`），  
   把这两处的 IP 都改成你的电脑 IP，端口保持 **12345**。  
@@ -398,14 +398,14 @@ ESP32 要访问的是「电脑在当前 WiFi（热点）下的 IP」，必须在
 
 **2）`硬件端/src/main.cpp`**
 
-- 搜索 `101.132.166.117`，会看到两处：
+- 搜索 `my_ip`，会看到两处：
   - **导航更新**：`/navigation_update`
   - **退出导航**：`/exit_navigation`  
   同样把 IP 改成电脑 IP，端口 **12345**。  
   例如：`http://192.168.43.123:12345/navigation_update` 和 `http://192.168.43.123:12345/exit_navigation`。
 
 **小结：**  
-以上 2 个文件里，所有 `101.132.166.117` 都改成你的电脑 IP，端口均为 **12345** 即可。
+以上 2 个文件里，所有 `my_ip` 都改成你的电脑 IP，端口均为 **12345** 即可。
 
 ---
 
@@ -415,7 +415,7 @@ ESP32 要访问的是「电脑在当前 WiFi（热点）下的 IP」，必须在
 2. 找到下面两行：
    ```c
    #define WIFI_SSID "sharp_caterpillar"
-   #define WIFI_PASSWORD "zzn20041031"
+   #define WIFI_PASSWORD "wifi_password"
    ```
 3. 改成你手机热点的名称和密码（用英文双引号包起来），例如：
    ```c
@@ -523,7 +523,7 @@ python app.py
 7. [ ] MAX98357A：BCLK=15, LRC=16, DIN=7，供电与 GND  
 8. [ ] 若接 GPS：改用 Serial1 并修改 `gps.h`，接线 GPS TX → ESP32 RX  
 9. [ ] 若用局域网（手机热点+电脑当服务器）：按 **第七章** 改好 **network.cpp、main.cpp** 里的电脑 IP 与端口 12345，并运行 `web/app.py`  
-10. [ ] 若自建云服务器：在 `network.cpp`、`main.cpp` 中把 `101.132.166.117` 与端口改为你的服务器地址  
+10. [ ] 若自建云服务器：在 `network.cpp`、`main.cpp` 中把 `my_ip` 与端口改为你的服务器地址  
 11. [ ] 百度语音：在 `config.h` 中配置自己的百度云语音应用（`BAIDU_CLIENT_ID`、`BAIDU_CLIENT_SECRET`），用于硬件端的**语音识别 + 语音合成**，不经过自建服务端
 
 按上述接线与配置后，用 PlatformIO 编译并烧录到 ESP32-S3，串口监视器 115200 可查看日志与调试信息。
