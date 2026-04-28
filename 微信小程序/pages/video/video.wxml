@@ -1,32 +1,80 @@
-<view class="page">
-  <view class="panel">
-    <view class="title">ESP32-CAM 局域网视频</view>
-    <view class="subtitle">请填写摄像头在手机热点下获取到的 IP，例如 192.168.43.123</view>
-
-    <input
-      class="ip-input"
-      placeholder="请输入摄像头 IP"
-      value="{{cameraIpInput}}"
-      bindinput="onIpInput"
-    />
-
-    <view class="actions">
-      <button type="primary" size="mini" bindtap="saveCameraIp">保存 IP</button>
-      <button size="mini" bindtap="testConnection">测试连接</button>
-      <button size="mini" bindtap="refreshStream">刷新画面</button>
-      <button size="mini" bindtap="previewCapture">抓拍预览</button>
+<view class="guardian-page">
+  <view class="hero">
+    <view>
+      <text class="eyebrow">家长端</text>
+      <text class="title">守护视野</text>
     </view>
-
-    <view class="status">{{statusText}}</view>
-    <view class="url" wx:if="{{streamUrl}}">直播地址：{{streamUrl}}</view>
+    <view class="status-pill status-{{statusTone}}">
+      <view class="status-dot"></view>
+      <text>{{statusText}}</text>
+    </view>
   </view>
 
-  <view class="stream-card" wx:if="{{canPreview}}">
-    <image
-      class="stream-image"
-      src="{{streamUrl}}"
-      mode="widthFix"
-      show-menu-by-longpress="{{true}}"
-    />
+  <view class="preview-card">
+    <view class="preview-head">
+      <view class="live-mark">
+        <view class="live-dot"></view>
+        <text>实时画面</text>
+      </view>
+      <text wx:if="{{lastSeenText}}" class="seen-text">{{lastSeenText}}</text>
+    </view>
+
+    <view class="preview-frame {{canPreview ? '' : 'preview-empty'}}">
+      <image
+        wx:if="{{canPreview}}"
+        class="preview-image"
+        src="{{activePreviewUrl}}"
+        mode="aspectFit"
+        bindload="onPreviewLoad"
+        binderror="onPreviewError"
+        show-menu-by-longpress="{{true}}"
+      />
+      <view wx:else class="empty-state">
+        <text class="empty-title">尚未连接</text>
+        <text class="empty-desc">连接导盲杖后显示画面</text>
+      </view>
+    </view>
+
+    <view class="view-note">{{viewNote}}</view>
+  </view>
+
+  <view class="device-card">
+    <view class="section-head">
+      <text class="section-title">连接导盲杖</text>
+      <text class="section-subtitle">设备地址</text>
+    </view>
+
+    <view class="connect-row">
+      <view class="address-box">
+        <input
+          class="address-input"
+          placeholder="例如 10.121.190.19"
+          placeholder-class="input-placeholder"
+          value="{{addressInput}}"
+          confirm-type="done"
+          bindinput="onAddressInput"
+          bindconfirm="connectDevice"
+        />
+      </view>
+      <button class="primary-button" loading="{{isConnecting}}" bindtap="connectDevice">连接</button>
+    </view>
+
+    <view class="quick-row" wx:if="{{quickHosts.length}}">
+      <button
+        wx:for="{{quickHosts}}"
+        wx:key="value"
+        class="quick-button"
+        data-ip="{{item.value}}"
+        bindtap="useQuickHost"
+      >
+        <text>{{item.label}}</text>
+        <text class="quick-address">{{item.value}}</text>
+      </button>
+    </view>
+
+    <view class="action-row">
+      <button class="soft-button" bindtap="checkDevice">检查连接</button>
+      <button class="soft-button" bindtap="refreshPreview">刷新画面</button>
+    </view>
   </view>
 </view>

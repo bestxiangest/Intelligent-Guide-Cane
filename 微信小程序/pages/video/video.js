@@ -1,137 +1,231 @@
-const STORAGE_KEY = 'esp32CamIp'
+const appConfig = require('../../config')
 
-function normalizeIp(value) {
-  let ip = (value || '').trim()
-  ip = ip.replace(/^https?:\/\//, '')
-  ip = ip.split('/')[0]
-  ip = ip.split(':')[0]
-  return ip
+const STORAGE_KEY = 'guideCaneCameraAddress'
+
+function normalizeCameraHost(value) {
+  let host = String(value || '').trim()
+  host = host.replace(/^https?:\/\//i, '')
+  host = host.split('?')[0]
+  host = host.split('#')[0]
+  host = host.split('/')[0]
+  host = host.split(':')[0]
+  return host
+}
+
+function formatTime(date) {
+  const pad = (num) => String(num).padStart(2, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 Page({
   data: {
-    cameraIpInput: '',
-    cameraIp: '',
-    streamUrl: '',
-    captureUrl: '',
+    addressInput: '',
+    deviceAddress: '',
     healthUrl: '',
-    statusText: '请输入 ESP32-CAM 的局域网 IP',
-    streamNonce: Date.now(),
-    canPreview: false
+    streamUrl: '',
+    streamAltUrl: '',
+    activePreviewUrl: '',
+    streamMode: '81',
+    statusText: '未连接',
+    statusTone: 'idle',
+    viewNote: '等待导盲杖画面',
+    lastSeenText: '',
+    canPreview: false,
+    isConnecting: false,
+    quickHosts: []
   },
 
   onLoad(options) {
-    const optionIp = normalizeIp((options || {}).ip || '')
-    const storedIp = normalizeIp(wx.getStorageSync(STORAGE_KEY) || '')
-    const cameraIp = optionIp || storedIp
+    const optionAddress = normalizeCameraHost((options || {}).ip)
+    const storedAddress = normalizeCameraHost(wx.getStorageSync(STORAGE_KEY))
+    const hotspotAddress = normalizeCameraHost(appConfig.defaultCameraIp)
+    const directAddress = normalizeCameraHost(appConfig.directCameraIp)
+    const deviceAddress = optionAddress || storedAddress || hotspotAddress
+    const quickHosts = [
+      { label: '热点地址', value: hotspotAddress },
+      { label: '设备直连', value: directAddress }
+    ].filter((item) => item.value)
 
     this.setData({
-      cameraIpInput: cameraIp,
-      cameraIp
+      quickHosts,
+      addressInput: deviceAddress,
+      deviceAddress
     })
 
-    if (cameraIp) {
-      this.rebuildUrls(cameraIp)
-      this.setData({
-        statusText: `已加载摄像头 IP：${cameraIp}`,
-        canPreview: true
-      })
+    if (deviceAddress) {
+      this.rebuildUrls(deviceAddress)
+      this.setStatus('待确认', 'idle')
+      this.checkDevice(deviceAddress)
     }
   },
 
-  rebuildUrls(cameraIp) {
+  setStatus(text, tone) {
+    this.setData({
+      statusText: text,
+      statusTone: tone || 'idle'
+    })
+  },
+
+  buildUrls(deviceAddress) {
     const nonce = Date.now()
+    return {
+      healthUrl: `http://${deviceAddress}/health?t=${nonce}`,
+      streamUrl: `http://${deviceAddress}:81/stream?t=${nonce}`,
+      streamAltUrl: `http://${deviceAddress}/stream?t=${nonce}`
+    }
+  },
+
+  getActivePreviewUrl(urls, streamMode) {
+    return streamMode === '80' ? urls.streamAltUrl : urls.streamUrl
+  },
+
+  rebuildUrls(deviceAddress, streamMode) {
+    const urls = this.buildUrls(deviceAddress)
+    const nextStreamMode = streamMode || this.data.streamMode
     this.setData({
-      cameraIp,
-      streamNonce: nonce,
-      streamUrl: `http://${cameraIp}:81/stream?t=${nonce}`,
-      captureUrl: `http://${cameraIp}/capture?t=${nonce}`,
-      healthUrl: `http://${cameraIp}/health?t=${nonce}`
+      deviceAddress,
+      healthUrl: urls.healthUrl,
+      streamUrl: urls.streamUrl,
+      streamAltUrl: urls.streamAltUrl,
+      activePreviewUrl: this.getActivePreviewUrl(urls, nextStreamMode),
+      canPreview: Boolean(deviceAddress)
+    })
+    return urls
+  },
+
+  onAddressInput(e) {
+    this.setData({
+      addressInput: e.detail.value
     })
   },
 
-  onIpInput(e) {
+  useQuickHost(e) {
+    const deviceAddress = normalizeCameraHost(e.currentTarget.dataset.ip)
+    if (!deviceAddress) return
+
     this.setData({
-      cameraIpInput: e.detail.value
+      addressInput: deviceAddress
     })
+    this.connectDevice(deviceAddress)
   },
 
-  saveCameraIp() {
-    const cameraIp = normalizeIp(this.data.cameraIpInput)
-    if (!cameraIp) {
+  connectDevice(addressValue) {
+    const rawAddress = typeof addressValue === 'string' ? addressValue : this.data.addressInput
+    const deviceAddress = normalizeCameraHost(rawAddress)
+    if (!deviceAddress) {
       wx.showToast({
-        title: '请输入有效 IP',
+        title: '请输入设备地址',
         icon: 'none'
       })
       return
     }
 
-    wx.setStorageSync(STORAGE_KEY, cameraIp)
-    this.rebuildUrls(cameraIp)
+    wx.setStorageSync(STORAGE_KEY, deviceAddress)
     this.setData({
-      statusText: `已保存摄像头 IP：${cameraIp}`,
-      canPreview: true
+      streamMode: '81'
     })
+    this.rebuildUrls(deviceAddress, '81')
+    this.checkDevice(deviceAddress)
   },
 
-  refreshStream() {
-    if (!this.data.cameraIp) {
+  checkDevice(addressValue) {
+    const rawAddress = typeof addressValue === 'string'
+      ? addressValue
+      : this.data.deviceAddress || this.data.addressInput
+    const deviceAddress = normalizeCameraHost(rawAddress)
+    if (!deviceAddress) {
       wx.showToast({
-        title: '请先保存摄像头 IP',
+        title: '请先连接设备',
         icon: 'none'
       })
       return
     }
 
-    this.rebuildUrls(this.data.cameraIp)
-    this.setData({
-      statusText: '已刷新视频流连接'
-    })
-  },
-
-  testConnection() {
-    if (!this.data.cameraIp) {
-      wx.showToast({
-        title: '请先保存摄像头 IP',
-        icon: 'none'
-      })
-      return
-    }
-
-    this.setData({
-      statusText: '正在检查 ESP32-CAM 服务状态...'
-    })
+    const urls = this.rebuildUrls(deviceAddress)
+    this.setData({ isConnecting: true })
+    this.setStatus('连接中', 'testing')
 
     wx.request({
-      url: this.data.healthUrl,
+      url: urls.healthUrl,
       method: 'GET',
       timeout: 5000,
       success: (res) => {
-        if (res.statusCode === 200) {
+        if (res.statusCode === 200 && res.data) {
           this.setData({
-            statusText: `连接成功：${this.data.cameraIp}`
+            viewNote: '导盲杖画面已就绪',
+            lastSeenText: formatTime(new Date())
           })
+          this.setStatus('在线', 'ok')
         } else {
           this.setData({
-            statusText: `服务有响应，但状态码异常：${res.statusCode}`
+            viewNote: '设备有响应，画面暂未确认',
+            lastSeenText: formatTime(new Date())
           })
+          this.setStatus('待确认', 'warn')
         }
       },
-      fail: (err) => {
+      fail: () => {
         this.setData({
-          statusText: `连接失败：${err.errMsg || '未知错误'}`
+          viewNote: '请确认手机与导盲杖在同一网络',
+          lastSeenText: formatTime(new Date())
         })
+        this.setStatus('未连接', 'bad')
+      },
+      complete: () => {
+        this.setData({ isConnecting: false })
       }
     })
   },
 
-  previewCapture() {
-    if (!this.data.captureUrl) {
+  refreshPreview() {
+    if (!this.data.deviceAddress) {
+      wx.showToast({
+        title: '请先连接设备',
+        icon: 'none'
+      })
       return
     }
 
-    wx.previewImage({
-      urls: [this.data.captureUrl]
+    this.rebuildUrls(this.data.deviceAddress, this.data.streamMode)
+    this.setData({
+      viewNote: '画面已刷新',
+      lastSeenText: formatTime(new Date())
     })
+  },
+
+  tryBackupStream() {
+    if (!this.data.deviceAddress || this.data.streamMode === '80') {
+      return false
+    }
+
+    this.setData({
+      streamMode: '80',
+      viewNote: '正在尝试备用连接'
+    })
+    this.rebuildUrls(this.data.deviceAddress, '80')
+    return true
+  },
+
+  onPreviewLoad() {
+    this.setData({
+      viewNote: '导盲杖画面正在同步',
+      lastSeenText: formatTime(new Date())
+    })
+    if (this.data.statusTone !== 'ok') {
+      this.setStatus('在线', 'ok')
+    }
+  },
+
+  onPreviewError() {
+    if (this.tryBackupStream()) {
+      this.setStatus('连接中', 'testing')
+      return
+    }
+
+    this.setData({
+      viewNote: '画面暂时不可用',
+      lastSeenText: formatTime(new Date())
+    })
+    this.setStatus('未连接', 'bad')
   }
 })

@@ -16,5 +16,8 @@ String getAccessToken_baidu();
 String waitForAccessToken_baidu();
 String baidu_voice_recognition(String accessToken, uint8_t *audioData, int audioDataSize);
 void baiduTTS_Send(String access_token, String text);
+bool playAudioBuffer(uint8_t *audioBuffer, size_t audioLength);
+bool playLocalAudioBuffer(uint8_t *audioBuffer, size_t audioLength);
+bool playAudioStream(Stream &audioStream, size_t audioLength);
 
 #endif // VOICE_H

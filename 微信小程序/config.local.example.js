@@ -1,5 +1,7 @@
 module.exports = {
   amapKey: 'YOUR_AMAP_MINIPROGRAM_KEY',
+  defaultCameraIp: '10.121.190.19',
+  directCameraIp: '192.168.4.1',
   defaultDestination: {
     name: '华东交通大学',
     longitude: 115.868517,

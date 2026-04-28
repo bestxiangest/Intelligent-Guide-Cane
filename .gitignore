@@ -1,17 +1,25 @@
 # Python
 __pycache__/
+**/__pycache__/
 *.pyc
+.pytest_cache/
+/web/.pytest_cache/
+/web/.venv/
 
 # Local configuration
 /web/local_config.py
 /微信小程序/config.local.js
 /硬件端/src/config.local.h
+/esp-cam/esp_cam/esp_cam_local_config.h
 
 # Generated files
 **/.pio/
+/.pio-build-hardware/
 **/.vscode/c_cpp_properties.json
 **/.vscode/launch.json
 **/.vscode/ipch/
+/.playwright-mcp/
+/web.7z
 
 # Optional scratch docs that should stay local
 /esp32-cam-platformio/test/

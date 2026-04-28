@@ -1,4 +1,60 @@
 #include "network.h"
+#include "services/server_api.h"
+
+static const char *wifiStatusToString(wl_status_t status)
+{
+  switch (status)
+  {
+  case WL_IDLE_STATUS:
+    return "WL_IDLE_STATUS";
+  case WL_NO_SSID_AVAIL:
+    return "WL_NO_SSID_AVAIL";
+  case WL_SCAN_COMPLETED:
+    return "WL_SCAN_COMPLETED";
+  case WL_CONNECTED:
+    return "WL_CONNECTED";
+  case WL_CONNECT_FAILED:
+    return "WL_CONNECT_FAILED";
+  case WL_CONNECTION_LOST:
+    return "WL_CONNECTION_LOST";
+  case WL_DISCONNECTED:
+    return "WL_DISCONNECTED";
+  default:
+    return "UNKNOWN";
+  }
+}
+
+static void logMatchingWifiNetworks()
+{
+  Serial.println("  Scanning nearby WiFi networks for diagnostics...");
+  int networkCount = WiFi.scanNetworks(false, true);
+  if (networkCount < 0)
+  {
+    Serial.printf("  WiFi scan failed: %d\n", networkCount);
+    return;
+  }
+
+  bool foundTarget = false;
+  for (int i = 0; i < networkCount; ++i)
+  {
+    String ssid = WiFi.SSID(i);
+    if (ssid == WIFI_SSID)
+    {
+      foundTarget = true;
+      Serial.printf("  Found target SSID: channel=%d rssi=%d dBm auth=%d\n",
+                    WiFi.channel(i),
+                    WiFi.RSSI(i),
+                    WiFi.encryptionType(i));
+    }
+  }
+
+  if (!foundTarget)
+  {
+    Serial.printf("  Target SSID was not found in %d scanned networks.\n", networkCount);
+  }
+
+  WiFi.scanDelete();
+}
 
 void initWiFi()
 {
@@ -6,17 +62,11 @@ void initWiFi()
   Serial.printf("  SSID: %s\n", WIFI_SSID);
 
   WiFi.mode(WIFI_STA);
-  WiFi.setAutoReconnect(true);
   WiFi.persistent(false);
-
-  IPAddress noIp(0, 0, 0, 0);
-  IPAddress primaryDns(223, 5, 5, 5);
-  IPAddress secondaryDns(8, 8, 8, 8);
-  bool dnsConfigured = WiFi.config(noIp, noIp, noIp, primaryDns, secondaryDns);
-  Serial.printf("  DNS config: %s | primary=%s secondary=%s\n",
-                dnsConfigured ? "OK" : "FAIL",
-                primaryDns.toString().c_str(),
-                secondaryDns.toString().c_str());
+  WiFi.setAutoReconnect(true);
+  WiFi.setSleep(false);
+  WiFi.disconnect(false, true);
+  delay(250);
 
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
@@ -32,7 +82,11 @@ void initWiFi()
 
     if (attempts % 5 == 0)
     {
-      Serial.printf(" [%d s, status %d] ", attempts, WiFi.status());
+      wl_status_t status = WiFi.status();
+      Serial.printf(" [%d s, status %d/%s] ",
+                    attempts,
+                    status,
+                    wifiStatusToString(status));
     }
   }
   Serial.println();
@@ -50,69 +104,21 @@ void initWiFi()
   else
   {
     Serial.println("WiFi connection failed");
-    Serial.printf("  Final status: %d\n", WiFi.status());
+    wl_status_t status = WiFi.status();
+    Serial.printf("  Final status: %d/%s\n", status, wifiStatusToString(status));
+    logMatchingWifiNetworks();
     isConnectedToWifi = false;
   }
 }
 
 String sendTextToServer(String text)
 {
-  String serverUrl = String(SERVER_BASE_URL) + "/ai";
-
-  DynamicJsonDocument jsonDocument(1024);
-  jsonDocument["message"] = text;
-  String jsonStr;
-  serializeJson(jsonDocument, jsonStr);
-
-  HTTPClient http;
-  http.begin(serverUrl);
-  http.addHeader("Content-Type", "application/json");
-  int httpResponseCode = http.POST(jsonStr);
-  if (httpResponseCode > 0)
-  {
-    Serial.print("HTTP Response code: ");
-    Serial.println(httpResponseCode);
-    String payload = http.getString();
-    if (payload.length() > 0)
-    {
-      http.end();
-      return payload;
-    }
-  }
-  http.end();
-  return "Request failed";
+  return ServerApi::postAiText(text);
 }
 
 bool sendGpsData(double latitude, double longitude)
 {
-  String serverUrl = String(SERVER_BASE_URL) + "/gps";
-
-  DynamicJsonDocument jsonDocument(256);
-  jsonDocument["latitude"] = latitude;
-  jsonDocument["longitude"] = longitude;
-  String jsonStr;
-  serializeJson(jsonDocument, jsonStr);
-
-  HTTPClient http;
-  http.begin(serverUrl);
-  http.addHeader("Content-Type", "application/json");
   Serial.printf("[GPS] POST %s | payload={\"latitude\":%.6f,\"longitude\":%.6f}\n",
-                serverUrl.c_str(), latitude, longitude);
-  int httpResponseCode = http.POST(jsonStr);
-
-  bool ok = httpResponseCode >= 200 && httpResponseCode < 300;
-  String payload = http.getString();
-  if (!ok)
-  {
-    Serial.printf("[GPS] Server rejected upload | http=%d body=%s\n",
-                  httpResponseCode, payload.c_str());
-  }
-  else
-  {
-    Serial.printf("[GPS] Server acknowledged upload | http=%d body=%s\n",
-                  httpResponseCode, payload.c_str());
-  }
-
-  http.end();
-  return ok;
+                (String(SERVER_BASE_URL) + "/gps").c_str(), latitude, longitude);
+  return ServerApi::postGps(latitude, longitude);
 }
