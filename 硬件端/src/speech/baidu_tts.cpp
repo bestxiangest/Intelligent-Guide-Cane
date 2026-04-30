@@ -2,7 +2,7 @@
 
 #include "voice.h"
 
-void speakTextWithBaidu(String accessToken, String text)
+bool speakTextWithBaidu(String accessToken, String text)
 {
-  baiduTTS_Send(accessToken, text);
+  return baiduTTS_Send(accessToken, text);
 }

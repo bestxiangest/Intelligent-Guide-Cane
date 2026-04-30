@@ -1,6 +1,8 @@
 const appConfig = require('../../config')
 
 const STORAGE_KEY = 'guideCaneCameraAddress'
+const STREAM_PORT = 81
+const STREAM_PATH = '/stream'
 
 function normalizeCameraHost(value) {
   let host = String(value || '').trim()
@@ -21,11 +23,8 @@ Page({
   data: {
     addressInput: '',
     deviceAddress: '',
-    healthUrl: '',
     streamUrl: '',
-    streamAltUrl: '',
     activePreviewUrl: '',
-    streamMode: '81',
     statusText: '未连接',
     statusTone: 'idle',
     viewNote: '等待导盲杖画面',
@@ -53,9 +52,8 @@ Page({
     })
 
     if (deviceAddress) {
-      this.rebuildUrls(deviceAddress)
+      this.rebuildStream(deviceAddress)
       this.setStatus('待确认', 'idle')
-      this.checkDevice(deviceAddress)
     }
   },
 
@@ -66,31 +64,28 @@ Page({
     })
   },
 
-  buildUrls(deviceAddress) {
-    const nonce = Date.now()
-    return {
-      healthUrl: `http://${deviceAddress}/health?t=${nonce}`,
-      streamUrl: `http://${deviceAddress}:81/stream?t=${nonce}`,
-      streamAltUrl: `http://${deviceAddress}/stream?t=${nonce}`
-    }
+  buildStreamUrl(deviceAddress) {
+    return `http://${deviceAddress}:${STREAM_PORT}${STREAM_PATH}`
   },
 
-  getActivePreviewUrl(urls, streamMode) {
-    return streamMode === '80' ? urls.streamAltUrl : urls.streamUrl
-  },
-
-  rebuildUrls(deviceAddress, streamMode) {
-    const urls = this.buildUrls(deviceAddress)
-    const nextStreamMode = streamMode || this.data.streamMode
+  rebuildStream(deviceAddress) {
+    const streamUrl = this.buildStreamUrl(deviceAddress)
     this.setData({
       deviceAddress,
-      healthUrl: urls.healthUrl,
-      streamUrl: urls.streamUrl,
-      streamAltUrl: urls.streamAltUrl,
-      activePreviewUrl: this.getActivePreviewUrl(urls, nextStreamMode),
-      canPreview: Boolean(deviceAddress)
+      streamUrl,
+      activePreviewUrl: '',
+      canPreview: false
     })
-    return urls
+    if (deviceAddress) {
+      setTimeout(() => {
+        if (this.data.deviceAddress !== deviceAddress || this.data.streamUrl !== streamUrl) return
+        this.setData({
+          activePreviewUrl: streamUrl,
+          canPreview: true
+        })
+      }, 30)
+    }
+    return streamUrl
   },
 
   onAddressInput(e) {
@@ -122,10 +117,12 @@ Page({
 
     wx.setStorageSync(STORAGE_KEY, deviceAddress)
     this.setData({
-      streamMode: '81'
+      isConnecting: false,
+      viewNote: '正在打开导盲杖画面',
+      lastSeenText: formatTime(new Date())
     })
-    this.rebuildUrls(deviceAddress, '81')
-    this.checkDevice(deviceAddress)
+    this.rebuildStream(deviceAddress)
+    this.setStatus('连接中', 'testing')
   },
 
   checkDevice(addressValue) {
@@ -141,40 +138,13 @@ Page({
       return
     }
 
-    const urls = this.rebuildUrls(deviceAddress)
-    this.setData({ isConnecting: true })
-    this.setStatus('连接中', 'testing')
-
-    wx.request({
-      url: urls.healthUrl,
-      method: 'GET',
-      timeout: 5000,
-      success: (res) => {
-        if (res.statusCode === 200 && res.data) {
-          this.setData({
-            viewNote: '导盲杖画面已就绪',
-            lastSeenText: formatTime(new Date())
-          })
-          this.setStatus('在线', 'ok')
-        } else {
-          this.setData({
-            viewNote: '设备有响应，画面暂未确认',
-            lastSeenText: formatTime(new Date())
-          })
-          this.setStatus('待确认', 'warn')
-        }
-      },
-      fail: () => {
-        this.setData({
-          viewNote: '请确认手机与导盲杖在同一网络',
-          lastSeenText: formatTime(new Date())
-        })
-        this.setStatus('未连接', 'bad')
-      },
-      complete: () => {
-        this.setData({ isConnecting: false })
-      }
+    this.rebuildStream(deviceAddress)
+    this.setData({
+      isConnecting: false,
+      viewNote: '已重新打开热点视频流',
+      lastSeenText: formatTime(new Date())
     })
+    this.setStatus('连接中', 'testing')
   },
 
   refreshPreview() {
@@ -186,24 +156,11 @@ Page({
       return
     }
 
-    this.rebuildUrls(this.data.deviceAddress, this.data.streamMode)
+    this.rebuildStream(this.data.deviceAddress)
     this.setData({
       viewNote: '画面已刷新',
       lastSeenText: formatTime(new Date())
     })
-  },
-
-  tryBackupStream() {
-    if (!this.data.deviceAddress || this.data.streamMode === '80') {
-      return false
-    }
-
-    this.setData({
-      streamMode: '80',
-      viewNote: '正在尝试备用连接'
-    })
-    this.rebuildUrls(this.data.deviceAddress, '80')
-    return true
   },
 
   onPreviewLoad() {
@@ -217,11 +174,6 @@ Page({
   },
 
   onPreviewError() {
-    if (this.tryBackupStream()) {
-      this.setStatus('连接中', 'testing')
-      return
-    }
-
     this.setData({
       viewNote: '画面暂时不可用',
       lastSeenText: formatTime(new Date())

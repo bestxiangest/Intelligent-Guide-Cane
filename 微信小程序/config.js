@@ -1,11 +1,11 @@
 const defaults = {
-  amapKey: 'YOUR_AMAP_MINIPROGRAM_KEY',
+  amapKey: '8682f9b2b4e2fc0a58ca5515afa91e9f',
   defaultCameraIp: '10.121.190.19',
   directCameraIp: '192.168.4.1',
   defaultDestination: {
-    name: '华东交通大学',
-    longitude: 115.868517,
-    latitude: 28.742945
+    name: '电子科技大学中山校区',
+    longitude: 113.390342,
+    latitude: 22.527403
   },
   defaultBlindStick: {
     name: '导盲杖',

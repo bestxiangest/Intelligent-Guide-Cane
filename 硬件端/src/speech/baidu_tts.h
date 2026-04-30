@@ -3,6 +3,6 @@
 
 #include <Arduino.h>
 
-void speakTextWithBaidu(String accessToken, String text);
+bool speakTextWithBaidu(String accessToken, String text);
 
 #endif // BAIDU_TTS_H

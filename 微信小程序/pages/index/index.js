@@ -46,7 +46,8 @@ Page({
     steps:[],
     navigating:false,
     traffic_lights:0,
-    cnt:0
+    cnt:0,
+    showMap:true
   }, 
   ensureMapKey() {
     if (appConfig.amapKey) {
@@ -173,6 +174,16 @@ Page({
     //     },
     //   })
       that.toMyposition()
+  },
+  onShow: function() {
+      this.setData({
+          showMap:true
+      })
+  },
+  onHide: function() {
+      this.setData({
+          showMap:false
+      })
   },
   to_blind(){
       var that = this

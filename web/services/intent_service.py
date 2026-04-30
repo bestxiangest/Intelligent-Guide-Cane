@@ -21,6 +21,13 @@ NAV_PREFIXES = ("帮我导航到", "导航到", "带我去", "我要去", "去")
 WEATHER_KEYWORDS = ("天气", "下雨", "温度", "冷不冷", "热不热", "气温")
 NAV_UPDATE_TEXTS = ("下一步", "继续导航", "现在怎么走", "怎么走")
 NAV_STATUS_TEXTS = ("还有多远", "到哪了", "快到了吗")
+JOKE_TEXTS = ("讲个笑话", "讲笑话", "说个笑话", "来个笑话", "笑话")
+STORY_TEXTS = ("讲个故事", "讲故事", "说个故事", "来个故事", "故事")
+CHAT_TEXTS = ("陪我聊天", "聊聊天", "陪我说话", "和我聊天", "安慰我", "鼓励我")
+
+JOKE_REPLY = "当然。路灯为什么不睡觉？因为它一闭眼，整条街就黑了。"
+STORY_REPLY = "当然。从前有颗小星星迷了路，听见脚步声后，跟着勇气回了家。"
+CHAT_REPLY = "我在呢。你可以慢慢说，我会陪你聊，也能帮你导航和查天气。"
 
 
 def fast_intent(text: str, device_context: dict[str, Any] | None = None) -> IntentData | None:
@@ -36,6 +43,36 @@ def fast_intent(text: str, device_context: dict[str, Any] | None = None) -> Inte
             confidence=1.0,
             arguments={},
             reply="我在呢，请说导航、天气或者帮助。",
+            safety_level="normal",
+            source="fast",
+        )
+
+    if any(phrase in normalized for phrase in JOKE_TEXTS):
+        return IntentData(
+            intent="chat.normal",
+            confidence=0.98,
+            arguments={},
+            reply=JOKE_REPLY,
+            safety_level="normal",
+            source="fast",
+        )
+
+    if any(phrase in normalized for phrase in STORY_TEXTS):
+        return IntentData(
+            intent="chat.normal",
+            confidence=0.96,
+            arguments={},
+            reply=STORY_REPLY,
+            safety_level="normal",
+            source="fast",
+        )
+
+    if any(phrase in normalized for phrase in CHAT_TEXTS):
+        return IntentData(
+            intent="chat.normal",
+            confidence=0.94,
+            arguments={},
+            reply=CHAT_REPLY,
             safety_level="normal",
             source="fast",
         )

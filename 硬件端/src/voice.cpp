@@ -28,8 +28,13 @@ i2s_config_t i2sOut_config = {
     .channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT,
     .communication_format = i2s_comm_format_t(I2S_COMM_FORMAT_STAND_I2S),
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 10,
-    .dma_buf_len = 1024};
+    .dma_buf_count = 6,
+    .dma_buf_len = 512,
+    .use_apll = false,
+    .tx_desc_auto_clear = true,
+    .fixed_mclk = 0,
+    .mclk_multiple = I2S_MCLK_MULTIPLE_DEFAULT,
+    .bits_per_chan = I2S_BITS_PER_CHAN_DEFAULT};
 
 const i2s_pin_config_t i2sOut_pin_config = {
     .bck_io_num = MAX98357_BCLK,
@@ -39,6 +44,7 @@ const i2s_pin_config_t i2sOut_pin_config = {
 
 static uint32_t currentSpeakerSampleRate = 0;
 static uint16_t currentSpeakerChannels = 0;
+static const uint32_t kSpeakerDrainGuardMs = 40;
 
 // 初始化I2S
 void set_i2s()
@@ -180,6 +186,61 @@ static void playAudioStable(uint8_t *audioData, size_t audioDataSize)
   }
 }
 
+static size_t getSpeakerDmaQueueBytes()
+{
+  uint64_t queuedFrames = static_cast<uint64_t>(i2sOut_config.dma_buf_count) *
+                          static_cast<uint64_t>(i2sOut_config.dma_buf_len);
+  return static_cast<size_t>(queuedFrames * sizeof(int16_t));
+}
+
+static uint32_t getSpeakerDmaQueueMs(uint32_t playbackSampleRate)
+{
+  uint32_t sampleRate = playbackSampleRate > 0 ? playbackSampleRate : SAMPLE_RATE;
+  uint64_t queuedFrames = static_cast<uint64_t>(i2sOut_config.dma_buf_count) *
+                          static_cast<uint64_t>(i2sOut_config.dma_buf_len);
+  return static_cast<uint32_t>((queuedFrames * 1000ULL + sampleRate - 1) / sampleRate);
+}
+
+static void writeSpeakerSilenceBytes(size_t silenceBytes)
+{
+  silenceBytes &= ~static_cast<size_t>(0x01);
+  if (silenceBytes == 0)
+  {
+    return;
+  }
+
+  uint8_t silence[512] = {0};
+  size_t remaining = silenceBytes;
+  while (remaining > 0)
+  {
+    size_t chunkSize = min(remaining, sizeof(silence));
+    size_t bytesWritten = 0;
+    esp_err_t result = i2s_write(I2S_NUM_1, silence, chunkSize, &bytesWritten, portMAX_DELAY);
+    if (result != ESP_OK)
+    {
+      Serial.printf("[音频播放] 静音尾写入错误: %s\n", esp_err_to_name(result));
+      return;
+    }
+    if (bytesWritten == 0)
+    {
+      vTaskDelay(pdMS_TO_TICKS(1));
+      continue;
+    }
+    remaining -= bytesWritten;
+  }
+}
+
+static void waitForSpeakerDrain(uint32_t playbackSampleRate)
+{
+  size_t drainBytes = getSpeakerDmaQueueBytes();
+  uint32_t drainMs = getSpeakerDmaQueueMs(playbackSampleRate);
+  Serial.printf("[音频播放] 刷新I2S TX队列: %u bytes，最长约 %lu ms\n",
+                static_cast<unsigned>(drainBytes),
+                static_cast<unsigned long>(drainMs));
+  writeSpeakerSilenceBytes(drainBytes);
+  vTaskDelay(pdMS_TO_TICKS(kSpeakerDrainGuardMs));
+}
+
 void clearAudio(void)
 {
   // 清空I2S DMA缓冲区
@@ -236,8 +297,9 @@ static bool downloadHttpBody(HTTPClient &http, uint8_t **outBuffer, size_t *outL
     return false;
   }
 
-  int contentLength = http.getSize();
-  size_t capacity = contentLength > 0 ? static_cast<size_t>(contentLength) : 4096;
+  int expectedLength = http.getSize();
+  int contentLength = expectedLength;
+  size_t capacity = expectedLength > 0 ? static_cast<size_t>(expectedLength) : 4096;
   uint8_t *buffer = static_cast<uint8_t *>(
       heap_caps_malloc(capacity + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (buffer == nullptr)
@@ -253,10 +315,22 @@ static bool downloadHttpBody(HTTPClient &http, uint8_t **outBuffer, size_t *outL
   size_t totalRead = 0;
   unsigned long lastDataTime = millis();
 
-  while ((http.connected() || stream->available()) && (contentLength > 0 || contentLength == -1))
+  while (contentLength > 0 || contentLength == -1)
   {
-    size_t availableBytes = stream->available();
-    if (availableBytes == 0)
+    int availableResult = stream->available();
+    if (availableResult < 0)
+    {
+      Serial.printf("[语音合成] 错误: 音频流读取异常 available=%d\n", availableResult);
+      break;
+    }
+
+    bool connected = http.connected();
+    if (!connected && availableResult == 0)
+    {
+      break;
+    }
+
+    if (availableResult == 0)
     {
       if (millis() - lastDataTime > BAIDU_TTS_DOWNLOAD_IDLE_TIMEOUT_MS)
       {
@@ -266,6 +340,7 @@ static bool downloadHttpBody(HTTPClient &http, uint8_t **outBuffer, size_t *outL
       continue;
     }
 
+    size_t availableBytes = static_cast<size_t>(availableResult);
     if (contentLength > 0 && availableBytes > static_cast<size_t>(contentLength))
     {
       availableBytes = static_cast<size_t>(contentLength);
@@ -314,6 +389,16 @@ static bool downloadHttpBody(HTTPClient &http, uint8_t **outBuffer, size_t *outL
   {
     free(buffer);
     Serial.println("[语音合成] 错误: 未下载到任何音频数据");
+    return false;
+  }
+
+  if (expectedLength > 0 && contentLength > 0)
+  {
+    free(buffer);
+    Serial.printf("[语音合成] 错误: TTS音频下载不完整，已读=%u，应读=%u，剩余=%d\n",
+                  static_cast<unsigned>(totalRead),
+                  static_cast<unsigned>(expectedLength),
+                  contentLength);
     return false;
   }
 
@@ -373,8 +458,15 @@ static bool getWavPlaybackInfo(const uint8_t *buffer, size_t bufferLength, WavPl
       {
         return false;
       }
+      if (static_cast<size_t>(chunkSize) > bufferLength - dataOffset)
+      {
+        Serial.printf("[音频播放] WAV数据不完整，data声明=%u，实际=%u\n",
+                      static_cast<unsigned>(chunkSize),
+                      static_cast<unsigned>(bufferLength - dataOffset));
+        return false;
+      }
 
-      size_t dataLength = min(static_cast<size_t>(chunkSize), bufferLength - dataOffset);
+      size_t dataLength = static_cast<size_t>(chunkSize);
       info->payloadOffset = dataOffset;
       info->payloadLength = dataLength;
       return true;
@@ -626,7 +718,7 @@ static bool playDecodedAudioBufferAtRate(uint8_t *audioBuffer, size_t audioLengt
                 static_cast<unsigned>(playLength));
   clearAudio();
   playAudioStable(playPayload, playLength);
-  delay(200);
+  waitForSpeakerDrain(playbackSampleRate);
   clearAudio();
   return true;
 }
@@ -835,7 +927,7 @@ bool playAudioStream(Stream &audioStream, size_t audioLength)
                     static_cast<unsigned>(info.payloadLength));
       clearAudio();
       bool ok = playPcmPayloadFromStream(audioStream, info.payloadLength);
-      delay(200);
+      waitForSpeakerDrain(LOCAL_AUDIO_PLAYBACK_SAMPLE_RATE);
       clearAudio();
       return ok;
     }
@@ -1513,38 +1605,78 @@ void playAudio_Zai(void)
 }
 
 
-void baiduTTS_Send(String access_token, String text)
+static bool handleBaiduTtsHttpResponse(HTTPClient &http, int httpResponseCode, const char *transportName)
 {
-  if (access_token == "")
+  Serial.printf("[语音合成][%s] HTTP状态码=%d\n", transportName, httpResponseCode);
+
+  if (httpResponseCode <= 0)
   {
-    Serial.println("access_token is null");
-    return;
+    Serial.printf("[语音合成][%s] Error: %s\n",
+                  transportName,
+                  http.errorToString(httpResponseCode).c_str());
+    return false;
   }
 
-  if (text.length() == 0)
+  String contentType = http.header("Content-Type");
+  Serial.printf("[语音合成][%s] Content-Type=%s\n", transportName, contentType.c_str());
+
+  if (httpResponseCode != HTTP_CODE_OK)
   {
-    Serial.println("text is null");
-    return;
+    Serial.printf("[语音合成][%s] Error code: %d\n", transportName, httpResponseCode);
+    String response = http.getString();
+    Serial.println(response);
+    return false;
   }
-  String url = "https://tsn.baidu.com/text2audio";
-  String requestBody = buildBaiduTtsRequestBody(access_token, text);
 
-  WiFiClientSecure client;
-  client.setInsecure();
-  client.setTimeout((BAIDU_TTS_HTTP_TIMEOUT_MS + 999) / 1000);
-  client.setHandshakeTimeout(BAIDU_HTTPS_HANDSHAKE_TIMEOUT_SEC);
+  uint8_t *responseBuffer = nullptr;
+  size_t responseLength = 0;
+  if (!downloadHttpBody(http, &responseBuffer, &responseLength))
+  {
+    Serial.printf("[voice][tts][%s] response body download failed\n", transportName);
+    return false;
+  }
 
+  Serial.printf("[voice][tts][%s] response bytes=%u\n",
+                transportName,
+                static_cast<unsigned>(responseLength));
+  bool handled = false;
+
+  if (contentType.startsWith("audio") || bodyLooksLikeWav(responseBuffer, responseLength))
+  {
+    handled = playAudioBuffer(responseBuffer, responseLength);
+  }
+
+  if (!handled && (contentType.indexOf("json") >= 0 || bodyLooksLikeJson(responseBuffer, responseLength)))
+  {
+    handled = handleBaiduTtsJsonBody(responseBuffer, responseLength);
+  }
+
+  if (!handled)
+  {
+    Serial.printf("[voice][tts][%s] unhandled response body\n", transportName);
+    printBodyPreview(responseBuffer, responseLength);
+  }
+
+  free(responseBuffer);
+  return handled;
+}
+
+static bool postBaiduTtsRequest(WiFiClient &client,
+                                const String &url,
+                                const String &requestBody,
+                                const char *transportName)
+{
   HTTPClient http;
   if (!http.begin(client, url))
   {
-    Serial.println("[voice][tts] HTTPClient begin failed");
-    return;
+    Serial.printf("[voice][tts][%s] HTTPClient begin failed\n", transportName);
+    return false;
   }
 
   const char *headerKeys[] = {"Content-Type"};
   http.collectHeaders(headerKeys, 1);
   http.setReuse(false);
-  http.useHTTP10(true);
+  http.addHeader("Connection", "close");
   http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
   http.setConnectTimeout(BAIDU_TOKEN_CONNECT_TIMEOUT_MS);
   http.setTimeout(BAIDU_TTS_HTTP_TIMEOUT_MS);
@@ -1552,93 +1684,202 @@ void baiduTTS_Send(String access_token, String text)
   http.addHeader("Accept", "*/*");
   http.addHeader("cuid", String(BAIDU_CUID));
 
-  Serial.printf("[语音合成] 调用新版百度TTS接口，请求体长度=%u\n",
+  Serial.printf("[语音合成][%s] 调用百度TTS接口，请求体长度=%u\n",
+                transportName,
                 static_cast<unsigned>(requestBody.length()));
-  Serial.printf("[语音合成] 文本内容: %s\n", text.c_str());
 
   int httpResponseCode = http.POST(requestBody);
-  Serial.printf("[语音合成] HTTP状态码=%d\n", httpResponseCode);
-  if (httpResponseCode > 0)
-  {
-    String contentType = http.header("Content-Type");
-    if (httpResponseCode == HTTP_CODE_OK)
-    {
-      Serial.printf("[voice][tts] Content-Type=%s\n", contentType.c_str());
-
-      uint8_t *responseBuffer = nullptr;
-      size_t responseLength = 0;
-      if (!downloadHttpBody(http, &responseBuffer, &responseLength))
-      {
-        Serial.println("[voice][tts] response body download failed");
-        http.end();
-        return;
-      }
-
-      Serial.printf("[voice][tts] response bytes=%u\n", static_cast<unsigned>(responseLength));
-      bool handled = false;
-
-      if (contentType.startsWith("audio") || bodyLooksLikeWav(responseBuffer, responseLength))
-      {
-        handled = playAudioBuffer(responseBuffer, responseLength);
-      }
-
-      if (!handled && (contentType.indexOf("json") >= 0 || bodyLooksLikeJson(responseBuffer, responseLength)))
-      {
-        handled = handleBaiduTtsJsonBody(responseBuffer, responseLength);
-      }
-
-      if (!handled)
-      {
-        Serial.println("[voice][tts] unhandled response body");
-        printBodyPreview(responseBuffer, responseLength);
-      }
-
-      free(responseBuffer);
-      http.end();
-      return;
-    }
-    Serial.printf("[语音合成] Content-Type=%s\n", contentType.c_str());
-
-    if (httpResponseCode == HTTP_CODE_OK)
-    {
-      if (contentType.startsWith("audio"))
-      {
-        Serial.println("[语音合成] 收到原始音频流响应");
-        uint8_t *audioBuffer = nullptr;
-        size_t audioLength = 0;
-        if (downloadHttpBody(http, &audioBuffer, &audioLength))
-        {
-          playAudioBuffer(audioBuffer, audioLength);
-          free(audioBuffer);
-        }
-      }
-      else if (contentType.indexOf("json") >= 0)
-      {
-        Serial.println("[语音合成] 收到JSON响应，尝试解析");
-        String response = http.getString();
-        Serial.println(response);
-        if (!handleBaiduTtsJsonBody(response))
-        {
-          Serial.println("[语音合成] JSON响应未能转换为可播放音频");
-        }
-      }
-      else
-      {
-        Serial.println("[语音合成] 未知的Content-Type: " + contentType);
-      }
-    }
-    else
-    {
-      Serial.print("[语音合成] Error code: ");
-      Serial.println(httpResponseCode);
-      String response = http.getString();
-      Serial.println(response);
-    }
-  }
-  else
-  {
-    Serial.print("[语音合成] Error code: ");
-    Serial.println(httpResponseCode);
-  }
+  bool ok = handleBaiduTtsHttpResponse(http, httpResponseCode, transportName);
   http.end();
+  return ok;
+}
+
+static int utf8SafeEnd(const String &text, int start, int limit)
+{
+  int end = min(limit, static_cast<int>(text.length()));
+  while (end > start)
+  {
+    uint8_t c = static_cast<uint8_t>(text.charAt(end));
+    if ((c & 0xC0) != 0x80)
+    {
+      break;
+    }
+    --end;
+  }
+  return end > start ? end : limit;
+}
+
+static int punctuationLengthAt(const String &text, int index)
+{
+  static const char *const kPunctuation[] = {
+      "，", "。", "；", "！", "？", ",", ".", ";", "!", "?"};
+
+  for (size_t i = 0; i < sizeof(kPunctuation) / sizeof(kPunctuation[0]); ++i)
+  {
+    const char *token = kPunctuation[i];
+    size_t tokenLength = strlen(token);
+    if (index + static_cast<int>(tokenLength) > static_cast<int>(text.length()))
+    {
+      continue;
+    }
+    bool matched = true;
+    for (size_t j = 0; j < tokenLength; ++j)
+    {
+      if (text.charAt(index + j) != token[j])
+      {
+        matched = false;
+        break;
+      }
+    }
+    if (matched)
+    {
+      return static_cast<int>(tokenLength);
+    }
+  }
+  return 0;
+}
+
+static int findSegmentEnd(const String &text, int start, int maxBytes)
+{
+  int hardLimit = min(start + maxBytes, static_cast<int>(text.length()));
+  int bestPunctuationEnd = -1;
+  for (int i = start; i < hardLimit;)
+  {
+    int punctuationLength = punctuationLengthAt(text, i);
+    if (punctuationLength > 0)
+    {
+      bestPunctuationEnd = i + punctuationLength;
+      i += punctuationLength;
+      continue;
+    }
+    ++i;
+  }
+
+  if (bestPunctuationEnd > start)
+  {
+    return bestPunctuationEnd;
+  }
+  return utf8SafeEnd(text, start, hardLimit);
+}
+
+static int buildTtsSegments(const String &text, String *segments, int maxSegments)
+{
+  constexpr int kMaxSegmentBytes = 42;
+  int count = 0;
+  int start = 0;
+
+  while (start < static_cast<int>(text.length()) && count < maxSegments)
+  {
+    while (start < static_cast<int>(text.length()) && isspace(static_cast<unsigned char>(text.charAt(start))))
+    {
+      ++start;
+    }
+    if (start >= static_cast<int>(text.length()))
+    {
+      break;
+    }
+
+    int end = findSegmentEnd(text, start, kMaxSegmentBytes);
+    String segment = text.substring(start, end);
+    segment.trim();
+    if (segment.length() > 0)
+    {
+      segments[count++] = segment;
+    }
+    start = end;
+  }
+
+  if (start < static_cast<int>(text.length()) && count > 0)
+  {
+    String tail = text.substring(start);
+    tail.trim();
+    if (tail.length() > 0)
+    {
+      segments[count - 1] += tail;
+    }
+  }
+
+  return count;
+}
+
+static bool baiduTtsSendSingleSegment(const String &access_token, const String &text)
+{
+  if (access_token == "")
+  {
+    Serial.println("access_token is null");
+    return false;
+  }
+
+  if (text.length() == 0)
+  {
+    Serial.println("text is null");
+    return false;
+  }
+  String requestBody = buildBaiduTtsRequestBody(access_token, text);
+
+  Serial.printf("[语音合成] 分段文本: %s\n", text.c_str());
+  WiFiClient plainClient;
+  plainClient.setTimeout((BAIDU_TTS_HTTP_TIMEOUT_MS + 999) / 1000);
+  if (postBaiduTtsRequest(plainClient,
+                          "http://tsn.baidu.com/text2audio",
+                          requestBody,
+                          "http"))
+  {
+    return true;
+  }
+
+  Serial.println("[语音合成] HTTP失败，回退到HTTPS");
+  WiFiClientSecure secureClient;
+  secureClient.setInsecure();
+  secureClient.setTimeout((BAIDU_TTS_HTTP_TIMEOUT_MS + 999) / 1000);
+  secureClient.setHandshakeTimeout(BAIDU_HTTPS_HANDSHAKE_TIMEOUT_SEC);
+  if (postBaiduTtsRequest(secureClient,
+                          "https://tsn.baidu.com/text2audio",
+                          requestBody,
+                          "https"))
+  {
+    return true;
+  }
+
+  return false;
+}
+
+bool baiduTTS_Send(String access_token, String text)
+{
+  if (access_token == "")
+  {
+    Serial.println("access_token is null");
+    return false;
+  }
+
+  text.trim();
+  if (text.length() == 0)
+  {
+    Serial.println("text is null");
+    return false;
+  }
+
+  constexpr int kMaxTtsSegments = 8;
+  String segments[kMaxTtsSegments];
+  int segmentCount = buildTtsSegments(text, segments, kMaxTtsSegments);
+  if (segmentCount <= 0)
+  {
+    return false;
+  }
+
+  Serial.printf("[语音合成] 文本分为 %d 段\n", segmentCount);
+  for (int i = 0; i < segmentCount; ++i)
+  {
+    Serial.printf("[语音合成] 播放第 %d/%d 段\n", i + 1, segmentCount);
+    if (!baiduTtsSendSingleSegment(access_token, segments[i]))
+    {
+      Serial.printf("[语音合成] 第 %d 段播放失败\n", i + 1);
+      Serial.println("[语音合成] 百度TTS播放失败，播放本地网络异常提示");
+      playLocalAudioById("network_error_001");
+      return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(30));
+  }
+
+  return true;
 }

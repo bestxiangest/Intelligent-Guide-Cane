@@ -8,6 +8,18 @@ def test_fast_intent_greeting_skips_llm():
     assert intent.reply == "我在呢，请说导航、天气或者帮助。"
 
 
+def test_fast_intent_joke_is_chat_normal():
+    intent = fast_intent("给我讲个笑话听听。", {})
+    assert intent.intent == "chat.normal"
+    assert "路灯" in intent.reply
+
+
+def test_fast_intent_story_is_chat_normal():
+    intent = fast_intent("给我讲个故事", {})
+    assert intent.intent == "chat.normal"
+    assert intent.reply
+
+
 def test_fast_intent_navigation_start():
     intent = fast_intent("导航到图书馆", {})
     assert intent.intent == "navigation.start"

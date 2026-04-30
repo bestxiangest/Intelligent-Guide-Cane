@@ -135,6 +135,7 @@ void updateVoiceDetection(uint32_t audioEnergy, size_t *noVoicePre, size_t *noVo
 bool shouldStopRecording(size_t noVoiceTotal, size_t recordingSize);                                                             // 检查是否停止录音
 void resetRecordStatus();                                                                                                        // 重置录音状态
 bool isValidRecording(size_t recordingSize);                                                                                     // 检查录音有效性
+void playWaitPrompt();                                                                                                           // 播放处理中提示音
 void speakServerResponse(const ServerResponse &serverResponse);                                                                  // 播放服务端新响应
 
 // 导航相关函数
@@ -1089,6 +1090,8 @@ void handleVoiceInteraction()
     digitalWrite(LED_BUILT_IN, LOW);
     return;
   }
+
+  playWaitPrompt();
   
   ei_printf("[语音交互] 开始语音识别和处理\n");
   
@@ -1347,6 +1350,18 @@ bool isValidRecording(size_t recordingSize)
   return isValid;
 }
 
+void playWaitPrompt()
+{
+  ei_printf("[响应播报] 录音完成，播放请稍等提示\n");
+  setAppState(SPEAKING);
+  audioPlaybackInProgress = true;
+  if (!playLocalAudioById("wait_001"))
+  {
+    ei_printf("[响应播报] wait_001 本地提示音不可用，继续处理语音\n");
+  }
+  audioPlaybackInProgress = false;
+}
+
 /**
  * @brief 处理语音识别和响应
  */
@@ -1460,8 +1475,8 @@ void speakServerResponse(const ServerResponse &serverResponse)
   }
 
   try {
-    speakTextWithBaidu(accessToken, textToSpeak);
-    ei_printf("[语音合成] 语音合成完成\n");
+    bool ttsOk = speakTextWithBaidu(accessToken, textToSpeak);
+    ei_printf(ttsOk ? "[语音合成] 语音合成并播放完成\n" : "[语音合成] 语音合成或播放失败\n");
   } catch (...) {
     ei_printf("[语音合成] 错误:语音合成API调用异常\n");
   }
